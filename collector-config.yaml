@@ -1,0 +1,62 @@
+receivers:
+  otlp:
+    # HTTP only. Every producer in this workshop speaks OTLP/HTTP — the three
+    # Node services via @opentelemetry/exporter-*-otlp-http, and the browser,
+    # which has no gRPC option at all. A grpc block on 4317 would be a
+    # listening port nothing ever connects to.
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+        # Load-bearing — do not delete. The browser posts OTLP straight to
+        # this port (no proxy), and the page is served from a different port,
+        # so every browser export is a cross-origin request that fails
+        # preflight without this list.
+        #   :5173  `make run-frontend` pins this with --strictPort
+        #   :5174  Vite's fallback, for anyone running `npm run dev` by hand
+        cors:
+          allowed_origins:
+            - "http://localhost:5173"
+            - "http://localhost:5174"
+          allowed_headers:
+            - "*"
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  debug:
+    verbosity: detailed
+
+  # Datadog's OTLP intake, used only for browser RUM logs/spans.
+  otlp_http/datadog:
+    endpoint: https://otlp.${env:DD_SITE}
+
+    # Examples for specific signal paths:
+#    metrics_endpoint: https://otlp.${env:DD_SITE}/v1/metrics
+#    traces_endpoint: https://otlp.${env:DD_SITE}/v1/traces
+#    logs_endpoint: https://otlp.${env:DD_SITE}/v1/logs
+    headers:
+      dd-api-key: ${env:DD_API_KEY}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters:
+        - debug
+        - otlp_http/datadog
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters:
+#        - debug
+        - otlp_http/datadog
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters:
+        - debug
+        - otlp_http/datadog

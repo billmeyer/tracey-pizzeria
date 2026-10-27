@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    // node16 (not "commonjs"/"node") so TypeScript honors the `exports` map in
+    // package.json files. The gen_ai.* constants live behind the
+    // "@opentelemetry/semantic-conventions/incubating" subpath export, which
+    // the legacy "node" resolver cannot see. This package has no
+    // "type": "module", so the emit is still CommonJS.
+    "module": "node16",
+    "moduleResolution": "node16",
+    "outDir": "dist",
+    "rootDir": "src",
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "tracey-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/api-logs": "^0.222.0",
+    "@opentelemetry/browser-instrumentation": "^0.8.1",
+    "@opentelemetry/browser-sdk": "^0.4.0",
+    "@opentelemetry/instrumentation": "^0.222.0",
+    "@opentelemetry/opentelemetry-browser-detector": "^0.223.0",
+    "@opentelemetry/resources": "^2.11.0",
+    "@opentelemetry/sdk-logs": "^0.222.0",
+    "@opentelemetry/sdk-trace": "^2.11.0",
+    "@opentelemetry/semantic-conventions": "1.43.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^5.5.3",
+    "vite": "^8.3.3"
+  }
+}
