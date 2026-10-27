@@ -38,7 +38,8 @@ Browser (React MPA + OTel browser SDK, tracecontext propagator)
 Backend: tracey-backend (Node/Express + OTel SDK)
    │  spans on span-end, plus gen_ai.* metrics pushed to /v1/metrics every 10s
    │
-   ├──► Claude Haiku call: "chat claude-haiku-4-5-20251001" span (gen_ai.*)
+   ├──► Claude Haiku via Amazon Bedrock:
+   │    "chat us.anthropic.claude-haiku-4-5-20251001-v1:0" span (gen_ai.*)
    ├──► tracey-inventory: check_stock span (occasionally out of stock — pineapple, always)
    └──► tracey-kitchen: bake_pizza span (artificial delay — the "slow dependency")
    │
@@ -52,7 +53,9 @@ Four Node services plus the Collector. Only the Collector runs in a container �
 ## Setup
 
 1. Copy `.env.example` to `.env` and fill in:
-   - `ANTHROPIC_API_KEY` — your Anthropic API key
+   - `AWS_REGION` — the region to call Bedrock in (no default; the lab uses `us-east-1`)
+   - `BEDROCK_MODEL_ID` — *optional.* `backend/src/claude.ts` already defaults to the lab's `us.anthropic.claude-haiku-4-5-20251001-v1:0`; set this only to repoint at a different model
+   - `AWS_BEARER_TOKEN_BEDROCK` — the Bedrock API key, and the only credential the stack uses. It expires; see *Reference: Claude via Amazon Bedrock* below. In the Instruqt lab it is already in the VM environment.
    - `DD_API_KEY` / `DD_SITE` — your Datadog org (defaults to `datadoghq.com`)
    - `DD_RUM_APPLICATION_ID` — a RUM application you've created in Datadog (**UX Monitoring > RUM Applications > New Application**, choose "React"). The `Makefile` and `frontend/vite.config.ts` both read it from here, so there is no application id to edit in source.
 2. Run everything — **five terminals, one service each**. `make` with no arguments lists the targets:
@@ -156,7 +159,7 @@ Note the frontend is configured as a Vite **MPA** (`appType: 'mpa'`, four entrie
 
 ## Reference: OTel GenAI semantic conventions used
 
-Span name follows the convention's `{gen_ai.operation.name} {gen_ai.request.model}` pattern — `chat claude-haiku-4-5-20251001`. Attributes set in `backend/src/claude.ts`:
+Span name follows the convention's `{gen_ai.operation.name} {gen_ai.request.model}` pattern — `chat us.anthropic.claude-haiku-4-5-20251001-v1:0`. Attributes set in `backend/src/claude.ts`:
 
 - Request: `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.request.max_tokens`
 - Response: `gen_ai.response.id`, `gen_ai.response.model`, `gen_ai.response.finish_reasons`
@@ -167,6 +170,20 @@ Span name follows the convention's `{gen_ai.operation.name} {gen_ai.request.mode
 Two metrics on the `tracey.llm` meter, both histograms: `gen_ai.client.token.usage` (recorded twice per call, split by `gen_ai.token.type` = `input` / `output`) and `gen_ai.client.operation.duration` (seconds). These push to `/v1/metrics` every 10s — a separate OTLP endpoint, which is why `collector-config.yaml` carries a separate `metrics` pipeline.
 
 These are the exact attributes Datadog Agent Observability ingests natively — no Datadog SDK anywhere in `backend/`, `inventory-service/`, or `kitchen-service/`.
+
+`gen_ai.provider.name` is `aws.bedrock`, not `anthropic` — see the Bedrock section below. The constant appears twice in `claude.ts` (once on the span, once in the `common` object shared by both metric instruments) and the two must agree, or a metric time series and a span filter disagree on provider and the cross-signal correlation the workshop demonstrates quietly breaks.
+
+### Reference: Claude via Amazon Bedrock
+
+The backend reaches Claude through Bedrock, so there is no Anthropic API key anywhere in the stack. Three consequences worth knowing before the lab:
+
+| Concern | Detail |
+|---|---|
+| Client | `AnthropicBedrock` from `@anthropic-ai/bedrock-sdk` — the `bedrock-runtime` (InvokeModel) client, chosen because it accepts the `us.anthropic.…-v1:0` cross-region inference profile ids the lab provisions. Its `.messages.create()` surface is identical to the first-party client's, which is why `callClaude` is otherwise unchanged. |
+| Model id | `us.anthropic.claude-haiku-4-5-20251001-v1:0` — provider prefix, version suffix, and a leading `us.` marking a cross-region inference profile. The first-party `claude-haiku-4-5-20251001` 404s here. Read from `BEDROCK_MODEL_ID`. |
+| Credentials | `AWS_BEARER_TOKEN_BEDROCK` — a Bedrock API key, sent as a bearer token, and the only credential the stack uses. It is presigned and **time-limited**, so a long session can see it expire: Bedrock answers 403 and `/api/chat` 500s. The span still carries `error.type`, so the trace shows the failure, but the cause is credential expiry rather than anything about the request. If chat breaks partway through a lab, mint a fresh token before debugging the call. |
+
+Bedrock also drops several first-party features — automatic prompt caching, Batches, Files, the Models API, web search, and task budgets. This app uses none of them. Tool use, which the whole chat flow depends on, is supported.
 
 ### ⚠️ Prompt and completion content is captured
 

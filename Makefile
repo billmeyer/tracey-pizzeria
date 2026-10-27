@@ -4,7 +4,8 @@ SHELL := /bin/bash
 # attendee runs, so keep `help` first and keep its text honest.
 .DEFAULT_GOAL := help
 
-# Load the repo's .env so every target sees ANTHROPIC_API_KEY, DD_API_KEY,
+# Load the repo's .env so every target sees the AWS Bedrock settings
+# (AWS_REGION, AWS_BEARER_TOKEN_BEDROCK, BEDROCK_MODEL_ID), DD_API_KEY,
 # DD_SITE and DD_RUM_APPLICATION_ID.
 #
 # This is load-bearing in the Instruqt layout: the services run as five
@@ -99,7 +100,9 @@ run-backend:
 	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
 	OTEL_LOG_LEVEL=error \
 	OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true \
-	ANTHROPIC_API_KEY=$${ANTHROPIC_API_KEY} \
+	AWS_REGION=$${AWS_REGION} \
+	AWS_BEARER_TOKEN_BEDROCK=$${AWS_BEARER_TOKEN_BEDROCK} \
+	BEDROCK_MODEL_ID=$${BEDROCK_MODEL_ID} \
 	INVENTORY_URL=http://localhost:4001 \
 	KITCHEN_URL=http://localhost:4002 \
 	npm run dev

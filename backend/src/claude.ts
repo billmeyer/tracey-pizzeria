@@ -1,4 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
+// Types only — the Bedrock client is a drop-in for the Anthropic one, so the
+// request/response shapes still come from the core SDK's namespace.
+import type Anthropic from '@anthropic-ai/sdk';
 import { metrics, trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 // error.type is a *stable* attribute, so it comes from the package root.
 // Contrast the gen_ai.* import below: two entry points, one per stability
@@ -24,14 +27,35 @@ import {
   ATTR_GEN_AI_USAGE_INPUT_TOKENS,
   ATTR_GEN_AI_USAGE_OUTPUT_TOKENS,
   GEN_AI_OPERATION_NAME_VALUE_CHAT,
-  GEN_AI_PROVIDER_NAME_VALUE_ANTHROPIC,
+  GEN_AI_PROVIDER_NAME_VALUE_AWS_BEDROCK,
   GEN_AI_TOKEN_TYPE_VALUE_INPUT,
   GEN_AI_TOKEN_TYPE_VALUE_OUTPUT,
   METRIC_GEN_AI_CLIENT_OPERATION_DURATION,
   METRIC_GEN_AI_CLIENT_TOKEN_USAGE,
 } from '@opentelemetry/semantic-conventions/incubating';
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Claude is reached through Amazon Bedrock rather than Anthropic's own API, so
+// there is no ANTHROPIC_API_KEY anywhere in this stack. `AnthropicBedrock` is
+// the bedrock-runtime (InvokeModel) client, which is the one that accepts the
+// `us.anthropic.…-v1:0` cross-region inference profile IDs the lab provisions.
+// Its `.messages.create()` surface is identical to the first-party client's —
+// that is the whole point of using it instead of hand-rolling signed requests.
+//
+// Authentication is a Bedrock API key (AWS_BEARER_TOKEN_BEDROCK), which the
+// client sends as a bearer token. Both fields *default* to exactly these
+// environment variables, so the bare `new AnthropicBedrock()` would behave the
+// same; naming them keeps the dependency on the environment visible at the one
+// place a reader looks for it.
+//
+// That token is presigned and time-limited. When it expires mid-session
+// Bedrock answers 403 and the chat endpoint 500s — the span still carries
+// error.type, so the trace shows the failure, but the cause is an expired
+// credential rather than anything about the request. If chat starts failing
+// partway through a lab, check the token before debugging the call.
+const anthropic = new AnthropicBedrock({
+  awsRegion: process.env.AWS_REGION,
+  apiKey: process.env.AWS_BEARER_TOKEN_BEDROCK,
+});
 const tracer = trace.getTracer('tracey.llm');
 
 // The GenAI conventions define metrics as well as spans, and the *instrument
@@ -92,11 +116,37 @@ function captureMessageContentFromEnv(): boolean {
 
 const captureMessageContent = captureMessageContentFromEnv();
 
-export const MODEL = 'claude-haiku-4-5-20251001';
+/**
+ * Bedrock model identifier — note this is NOT the first-party model ID.
+ *
+ * Bedrock IDs carry a provider prefix and a version suffix, and the leading
+ * `us.` marks a *cross-region inference profile* rather than a single-region
+ * model: requests are served from whichever US region has capacity. That is
+ * also why the first-party `claude-haiku-4-5-20251001` would 404 here.
+ *
+ * Read from the environment so the lab can repoint at another model without a
+ * code change, with the provisioned value as the fallback. This string lands
+ * on every span twice over — as the span *name* (`chat us.anthropic.…`, per
+ * the GenAI convention's "{operation} {model}" pattern) and as
+ * gen_ai.request.model — so changing it reshapes the traces attendees see.
+ */
+export const MODEL =
+  process.env.BEDROCK_MODEL_ID || 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
 
 export type ClaudeMessage = Anthropic.MessageParam;
 export type ClaudeTool = Anthropic.Tool;
 export type ClaudeResponse = Anthropic.Message;
+
+/**
+ * One `tool_result` block to hand back to Claude.
+ *
+ * Exported because `ClaudeMessage['content']` cannot express this: as of SDK
+ * v1, `MessageParam` is a union of per-role shapes, and the `system` member
+ * narrows content to text blocks only — so indexing into it yields an array
+ * that rejects `tool_result`. Naming the block type directly is both more
+ * honest about what the array holds and immune to that union growing again.
+ */
+export type ClaudeToolResult = Anthropic.ToolResultBlockParam;
 
 /**
  * Converts an Anthropic content block (request or response side) into a
@@ -168,7 +218,7 @@ export async function callClaude(
       kind: SpanKind.CLIENT,
       attributes: {
         [ATTR_GEN_AI_OPERATION_NAME]: GEN_AI_OPERATION_NAME_VALUE_CHAT,
-        [ATTR_GEN_AI_PROVIDER_NAME]: GEN_AI_PROVIDER_NAME_VALUE_ANTHROPIC,
+        [ATTR_GEN_AI_PROVIDER_NAME]: GEN_AI_PROVIDER_NAME_VALUE_AWS_BEDROCK,
         [ATTR_GEN_AI_REQUEST_MODEL]: MODEL,
         [ATTR_GEN_AI_REQUEST_MAX_TOKENS]: 1024,
         // Gated — see captureMessageContent above. Note the metrics and every
@@ -182,7 +232,7 @@ export async function callClaude(
     async (span) => {
       const common = {
         [ATTR_GEN_AI_OPERATION_NAME]: GEN_AI_OPERATION_NAME_VALUE_CHAT,
-        [ATTR_GEN_AI_PROVIDER_NAME]: GEN_AI_PROVIDER_NAME_VALUE_ANTHROPIC,
+        [ATTR_GEN_AI_PROVIDER_NAME]: GEN_AI_PROVIDER_NAME_VALUE_AWS_BEDROCK,
         [ATTR_GEN_AI_REQUEST_MODEL]: MODEL,
       };
 

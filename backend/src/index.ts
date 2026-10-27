@@ -12,7 +12,7 @@ import {
   ATTR_GEN_AI_TOOL_TYPE,
   GEN_AI_OPERATION_NAME_VALUE_EXECUTE_TOOL,
 } from '@opentelemetry/semantic-conventions/incubating';
-import { callClaude, ClaudeMessage, ClaudeTool } from './claude';
+import { callClaude, ClaudeMessage, ClaudeTool, ClaudeToolResult } from './claude';
 import { getSession, hasSession, resetSession, Address, Fulfillment } from './state';
 import { priceOrder } from './pricing';
 
@@ -119,7 +119,10 @@ app.post('/api/chat', async (req, res) => {
         break;
       }
 
-      const toolResults: ClaudeMessage['content'] = [];
+      // Typed as the block, not as ClaudeMessage['content']: that indexed
+      // access collapses to text-only blocks now that MessageParam is a union
+      // of per-role shapes (see ClaudeToolResult in claude.ts).
+      const toolResults: ClaudeToolResult[] = [];
 
       for (const block of response.content) {
         if (block.type !== 'tool_use') continue;
