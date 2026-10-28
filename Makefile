@@ -134,4 +134,4 @@ run-frontend:
 	VITE_DD_SITE=$${DD_SITE} \
 	VITE_OTEL_COLLECTOR_URL=http://localhost:4318 \
 	VITE_OTEL_SERVICE_NAME=tracey-frontend \
-	npm run dev -- --port 5173 --strictPort
+	npm run dev -- --host 0.0.0.0 --port 5173 --strictPort
