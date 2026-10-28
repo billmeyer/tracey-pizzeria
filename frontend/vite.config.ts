@@ -41,6 +41,7 @@ export default defineConfig(({mode}) => {
         },
 
         server: {
+            allowedHosts: true,
             proxy: {
                 '/api': 'http://localhost:4000',
             },
