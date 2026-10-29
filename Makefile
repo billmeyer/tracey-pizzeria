@@ -26,7 +26,7 @@ export
 
 help:
 	@echo "Targets:"
-	@echo "  make install                Install dependencies for all four services"
+	@echo "  make install                Install dependencies for all four services (in parallel)"
 	@echo ""
 	@echo "Run these in five separate terminals, in this order:"
 	@echo "  make run-otel-collector     1. OTel Collector, OTLP/HTTP on 4318 (requires docker)"
@@ -37,7 +37,23 @@ help:
 	@echo ""
 	@echo "Then open http://localhost:5173 in the browser."
 
-install: install-backend install-frontend install-inventory install-kitchen
+# The four installs are independent, so `make install` fans them out rather
+# than running them end to end. It does that by re-entering make with -j4
+# instead of declaring the four targets as prerequisites: that way the
+# parallelism belongs to this one target, attendees never have to remember
+# `make -j4 install`, and the run-* targets stay sequential.
+#
+# --output-sync=target keeps each service's npm output in one contiguous block
+# instead of four interleaved streams — the difference between a readable
+# install and noise. It arrived in GNU Make 4.0, and macOS still ships 3.81,
+# where an unknown flag is a hard error; hence the version guard rather than
+# passing it unconditionally. On 3.81 the installs still run in parallel, the
+# output is just interleaved.
+MAKE_MAJOR_VERSION := $(firstword $(subst ., ,$(MAKE_VERSION)))
+OUTPUT_SYNC := $(if $(filter-out 3,$(MAKE_MAJOR_VERSION)),--output-sync=target)
+
+install:
+	$(MAKE) $(OUTPUT_SYNC) -j4 install-backend install-frontend install-inventory install-kitchen
 
 install-backend:
 	cd backend && npm install
