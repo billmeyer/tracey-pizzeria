@@ -43,7 +43,18 @@ export default defineConfig(({mode}) => {
         server: {
             allowedHosts: true,
             proxy: {
-                '/api': 'http://localhost:4000',
+                // The backend is on localhost when the dev server runs on the
+                // host (`make run-frontend`) and at `http://backend:4000` under
+                // compose, where localhost is the frontend container itself.
+                // Env-driven so both paths work unchanged — compose sets
+                // VITE_API_PROXY_TARGET, the host path leaves it unset.
+                //
+                // Read from process.env rather than import.meta.env because it
+                // is consumed by the dev server in Node, not by anything
+                // shipped to the browser. The proxy is server-side: the browser
+                // only ever talks to :5173, which is why the backend's port
+                // needs no publishing for the funnel to work.
+                '/api': process.env.VITE_API_PROXY_TARGET || 'http://localhost:4000',
             },
         },
 

@@ -6,6 +6,24 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
 
+# Dev stage — what compose.yaml builds (`target: dev`).
+#
+# Runs `tsx watch` instead of compiled output so an edit reloads the service,
+# matching what `make run-backend` does on the host. compose bind-mounts ./src
+# over the copy below; the COPY is still here so the image runs standalone.
+#
+# Deliberately placed *before* the production stage: Docker treats the last
+# stage as the default build target, so appending this at the end would make a
+# bare `docker build ./backend` produce the dev image.
+FROM node:24-alpine AS dev
+WORKDIR /app
+COPY package.json ./
+RUN npm install
+COPY tsconfig.json ./
+COPY src ./src
+EXPOSE 4000
+CMD ["npm", "run", "dev"]
+
 FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production

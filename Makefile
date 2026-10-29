@@ -22,18 +22,22 @@ SHELL := /bin/bash
 export
 
 .PHONY: help install install-backend install-frontend install-inventory install-kitchen \
-	run-otel-collector run-backend run-frontend run-inventory-service run-kitchen-service
+	check-collector-config run-stack \
+	run-collector run-backend run-frontend run-inventory run-kitchen
 
 help:
 	@echo "Targets:"
 	@echo "  make install                Install dependencies for all four services (in parallel)"
 	@echo ""
 	@echo "Run these in five separate terminals, in this order:"
-	@echo "  make run-otel-collector     1. OTel Collector, OTLP/HTTP on 4318 (requires docker)"
-	@echo "  make run-inventory-service  2. inventory-service on PORT 4001"
-	@echo "  make run-kitchen-service    3. kitchen-service on PORT 4002"
+	@echo "  make run-collector          1. OTel Collector, OTLP/HTTP on 4318 (requires docker)"
+	@echo "  make run-inventory          2. inventory on PORT 4001"
+	@echo "  make run-kitchen            3. kitchen on PORT 4002"
 	@echo "  make run-backend            4. backend on PORT 4000"
 	@echo "  make run-frontend           5. frontend dev server (vite) on PORT 5173"
+	@echo ""
+	@echo "Or run the whole stack in containers instead, from one terminal:"
+	@echo "  make run-stack              all five services, dependencies ordered for you"
 	@echo ""
 	@echo "Then open http://localhost:5173 in the browser."
 
@@ -62,22 +66,21 @@ install-frontend:
 	cd frontend && npm install
 
 install-inventory:
-	cd inventory-service && npm install
+	cd inventory && npm install
 
 install-kitchen:
-	cd kitchen-service && npm install
+	cd kitchen && npm install
 
-# The OTel Collector has no native binary target here; run it via Docker
-# using the same config the other services expect to send data to. This is
-# the only target that needs Docker at all.
+# Shared by run-collector and run-stack, because both bind-mount
+# collector-config.yaml and both hit the same hazard if it is missing.
 #
-# The config check is not defensive padding. `docker run -v` against a host
-# path that does not exist makes the daemon create a *directory* there — so a
-# missing collector-config.yaml would silently leave a directory of that name
-# sitting in the repo, and the real file could then never be written. At
-# workshop/start the config is deliberately absent (it is the Chapter 03
-# asset), so this is the expected path on day one, not an edge case.
-run-otel-collector:
+# The check is not defensive padding. A bind mount against a host path that
+# does not exist makes the daemon create a *directory* there — so a missing
+# collector-config.yaml would silently leave a directory of that name sitting
+# in the repo, and the real file could then never be written. At workshop
+# start the config is deliberately absent (it is the Chapter 03 asset), so
+# this is the expected path on day one, not an edge case.
+check-collector-config:
 	@test -f collector-config.yaml || { \
 		echo ""; \
 		echo "  collector-config.yaml not found."; \
@@ -88,6 +91,21 @@ run-otel-collector:
 		echo ""; \
 		exit 1; \
 	}
+
+# Containerised alternative to the five run-* targets: compose brings up all
+# five services with the dependency ordering declared in compose.yaml.
+#
+# --build rather than a bare `up` so an edited Dockerfile or a changed
+# package.json is picked up instead of silently reusing a stale image. The
+# source itself is bind-mounted and hot-reloads, so a code edit alone does not
+# need a rebuild.
+run-stack: check-collector-config
+	docker compose up --build
+
+# The OTel Collector has no native binary target here; run it via Docker
+# using the same config the other services expect to send data to. On the
+# five-terminal path this is the only target that needs Docker.
+run-collector: check-collector-config
 	docker run --rm -it \
 		-p 4318:4318 \
 		-v $(CURDIR)/collector-config.yaml:/etc/otelcol/config.yaml:ro \
@@ -123,16 +141,16 @@ run-backend:
 	KITCHEN_URL=http://localhost:4002 \
 	npm run dev
 
-run-inventory-service:
-	cd inventory-service && \
+run-inventory:
+	cd inventory && \
 	PORT=4001 \
 	OTEL_SERVICE_NAME=tracey-inventory \
 	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
 	OTEL_LOG_LEVEL=error \
 	npm run dev
 
-run-kitchen-service:
-	cd kitchen-service && \
+run-kitchen:
+	cd kitchen && \
 	PORT=4002 \
 	OTEL_SERVICE_NAME=tracey-kitchen \
 	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \

@@ -12,7 +12,7 @@ order chat      pickup or         fake card         received → making →
                                                     delivered
 ```
 
-The tracking stages diverge at the hand-off (`kitchen-service/src/index.ts` → `DELIVERY_STAGES` / `PICKUP_STAGES`): a delivery order ends `out_for_delivery → delivered`, a pickup order ends at `ready_for_pickup`. Each stage holds for `STAGE_DURATION_MS` (9s), so a full funnel finishes while you're still talking about it. `frontend/src/lib/order.ts` maps the stage ids to the labels and icons the page shows (`baking` → "In the oven").
+The tracking stages diverge at the hand-off (`kitchen/src/index.ts` → `DELIVERY_STAGES` / `PICKUP_STAGES`): a delivery order ends `out_for_delivery → delivered`, a pickup order ends at `ready_for_pickup`. Each stage holds for `STAGE_DURATION_MS` (9s), so a full funnel finishes while you're still talking about it. `frontend/src/lib/order.ts` maps the stage ids to the labels and icons the page shows (`baking` → "In the oven").
 
 Each arrow is a **hard page transition** (`location.assign`), not client-side routing. That is deliberate: a real browser unload/load means every step reports its *own* `browser.navigation_timing`, its *own* Core Web Vitals, and its *own* resource timings. With a SPA router the SDK can only emit a `browser.navigation` marker, and the navigation/vitals numbers stay pinned to the first document forever — so there is nothing per-step to compare.
 
@@ -48,7 +48,7 @@ OTel Collector → Datadog (APM Traces, RUM Sessions, Agent Observability)
    three pipelines — traces, metrics, logs — all to otlp.$DD_SITE
 ```
 
-Four Node services plus the Collector. Only the Collector runs in a container — the rest run as local processes, one per terminal (see Setup).
+Four Node services plus the Collector. Two ways to run them: five local processes with only the Collector containerised (`make run-*`), or all five in containers (`docker compose up`). Both are supported — see Setup.
 
 ## Setup
 
@@ -60,15 +60,17 @@ Four Node services plus the Collector. Only the Collector runs in a container �
    - `DD_RUM_APPLICATION_ID` — a RUM application you've created in Datadog (**UX Monitoring > RUM Applications > New Application**, choose "React"). The `Makefile` and `frontend/vite.config.ts` both read it from here, so there is no application id to edit in source.
 2. Run everything — **five terminals, one service each**. `make` with no arguments lists the targets:
 
-   | Terminal | Command                      |
-   |----------|------------------------------|
-   | 1        | `make run-otel-collector`    |
-   | 2        | `make run-inventory-service` |
-   | 3        | `make run-kitchen-service`   |
-   | 4        | `make run-backend`           |
-   | 5        | `make run-frontend`          |
+   | Terminal | Command             |
+   |----------|---------------------|
+   | 1        | `make run-collector`|
+   | 2        | `make run-inventory`|
+   | 3        | `make run-kitchen`  |
+   | 4        | `make run-backend`  |
+   | 5        | `make run-frontend` |
 
-   Start the Collector first so the other four have somewhere to export from their first span. It is the only thing that needs Docker — a single `docker run`, no Compose. The other four run under `tsx watch` / Vite, so edits reload in the terminal that owns them, and there is nothing to rebuild. The Makefile loads `.env` itself, so every terminal gets the keys with no per-terminal setup.
+   Start the Collector first so the other four have somewhere to export from their first span. On this path it is the only thing that needs Docker — a single `docker run`. The other four run under `tsx watch` / Vite, so edits reload in the terminal that owns them, and there is nothing to rebuild. The Makefile loads `.env` itself, so every terminal gets the keys with no per-terminal setup.
+
+   **Or run the whole stack in containers** — `docker compose up --build` is a supported alternative to the five terminals; see *Running under Docker Compose* below.
 
 3. Open **http://localhost:5173**, order a pizza, then walk the funnel: confirm the pizza in chat → **Checkout** → pickup or delivery → **Next** → card and tip → **Complete purchase** → watch the tracking page.
 
@@ -149,11 +151,40 @@ One file carries an explicit `WORKSHOP EXERCISE` comment block. It's fully imple
 
 Section 2 covers browser→backend trace propagation in `frontend/src/rum/otel-rum.ts`, but that file carries **no** `WORKSHOP EXERCISE` marker — the relevant code is `propagateTraceHeaderCorsUrls` on the `FetchInstrumentation` and `XhrInstrumentation` registrations (around lines 366-373), currently set to `[/.*/]`. Narrow or remove that to demonstrate the effect; if you want it marked up like Section 1, the annotation still needs writing.
 
-Everything else (auto-instrumentation, the Collector pipeline, the Inventory/ Kitchen services, Agent Observability ingestion) works out of the box and doesn't need to be built live — it's the scaffolding the exercises sit inside.
+Everything else (auto-instrumentation, the Collector pipeline, the Inventory/Kitchen services, Agent Observability ingestion) works out of the box and doesn't need to be built live — it's the scaffolding the exercises sit inside.
+
+## Running under Docker Compose
+
+`docker compose up --build` brings up all five services. `compose.yaml` is an alternative to the five-terminal path, not a replacement — both are maintained, and neither needs code changes to switch, because the compose service names (`collector`, `inventory`, `kitchen`, `backend`, `frontend`) are exactly the hostnames the source already falls back to when `OTEL_EXPORTER_OTLP_ENDPOINT` / `INVENTORY_URL` / `KITCHEN_URL` are unset.
+
+Each service builds the `dev` stage of its Dockerfile and bind-mounts `./src`, so edits hot-reload here the same way they do on the host. Only `src/` and the config files are mounted — mounting a service root would shadow the image's `node_modules` with the host's and break the container.
+
+Startup is health-gated rather than merely ordered:
+
+```
+collector  (started)
+   ├─► inventory ──┐  (healthy: /healthz answers)
+   ├─► kitchen ────┤
+   └─────────────► backend  (healthy)
+                      └─────► frontend
+```
+
+The three Node services have healthchecks hitting `/healthz`, and `backend` waits for `inventory` and `kitchen` to pass them, so the first chat message can't race a cold dependency. The probes invoke `node` rather than curl or wget — `node` is the one binary a node image is guaranteed to have. The Collector is gated with `service_started` instead: its image is minimal and may carry no shell for a probe to run, and gating buys little anyway since the OTel SDKs retry exports.
+
+Two environment variables are deliberately asymmetric, and getting them backwards is the most likely way to break this:
+
+| Variable | Value | Why |
+|---|---|---|
+| `VITE_OTEL_COLLECTOR_URL` | `http://localhost:4318` | Consumed by the **browser**, which resolves it against the host — not the compose network. Pointing it at `http://collector:4318` breaks every browser OTLP export. |
+| `VITE_API_PROXY_TARGET` | `http://backend:4000` | Consumed by the Vite dev server **inside** the container, where `localhost` is the frontend itself. |
+
+Ports: `5173` (frontend) and `4318` (Collector, because the browser posts to it directly) are required. `4000` is published only for curling the API. `inventory` and `kitchen` stay internal, matching the architecture diagram — reach them with `docker compose exec`.
+
+Credentials come from the same `.env`, which compose reads automatically. `DD_API_KEY`, `DD_RUM_APPLICATION_ID`, and `AWS_BEARER_TOKEN_BEDROCK` are declared with `:?`, so a missing one fails immediately naming the variable instead of surfacing later as a 401 from the Datadog exporter or a 403 from Bedrock.
 
 ## Local dev without Docker
 
-This is the `make` path above, and it is what the workshop runs. Each Node service runs under `tsx watch` and the frontend under Vite's dev server, so everything hot-reloads. The targets set `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` and the localhost service URLs for you; `vite.config.ts` proxies `/api` to `localhost:4000` so the browser's API calls stay same-origin. Only `make run-otel-collector` needs Docker.
+This is the `make` path above, and it is what the workshop runs. Each Node service runs under `tsx watch` and the frontend under Vite's dev server, so everything hot-reloads. The targets set `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` and the localhost service URLs for you; `vite.config.ts` proxies `/api` to `localhost:4000` so the browser's API calls stay same-origin. Only `make run-collector` needs Docker.
 
 Note the frontend is configured as a Vite **MPA** (`appType: 'mpa'`, four entries in `build.rollupOptions.input`). The dev server therefore has no SPA fallback: a mistyped path 404s instead of silently serving the order page. Always navigate *with* the trailing slash (`/checkout/`, not `/checkout`) to avoid a redirect hop before the page load.
 
@@ -169,7 +200,7 @@ Span name follows the convention's `{gen_ai.operation.name} {gen_ai.request.mode
 
 Two metrics on the `tracey.llm` meter, both histograms: `gen_ai.client.token.usage` (recorded twice per call, split by `gen_ai.token.type` = `input` / `output`) and `gen_ai.client.operation.duration` (seconds). These push to `/v1/metrics` every 10s — a separate OTLP endpoint, which is why `collector-config.yaml` carries a separate `metrics` pipeline.
 
-These are the exact attributes Datadog Agent Observability ingests natively — no Datadog SDK anywhere in `backend/`, `inventory-service/`, or `kitchen-service/`.
+These are the exact attributes Datadog Agent Observability ingests natively — no Datadog SDK anywhere in `backend/`, `inventory/`, or `kitchen/`.
 
 `gen_ai.provider.name` is `aws.bedrock`, not `anthropic` — see the Bedrock section below. The constant appears twice in `claude.ts` (once on the span, once in the `common` object shared by both metric instruments) and the two must agree, or a metric time series and a span filter disagree on provider and the cross-signal correlation the workshop demonstrates quietly breaks.
 

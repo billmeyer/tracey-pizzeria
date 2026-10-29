@@ -1,0 +1,175 @@
+# One-command alternative to the five-terminal `make run-*` path. Both are
+# supported and both stay in sync: the service names below are exactly the
+# hostnames the source already falls back to (`http://inventory:4001`,
+# `http://kitchen:4002`, `http://collector:4318`), so the code needs no
+# compose-specific branching.
+#
+# Every service builds its Dockerfile's `dev` stage and bind-mounts ./src, so
+# edits hot-reload here the same way they do on the host. Only ./src and the
+# config files are mounted, never the service root — mounting the root would
+# shadow the image's node_modules with the host's and break the container.
+#
+# The three healthchecks shell out to `node` rather than curl or wget: node is
+# the one binary a node image is guaranteed to have, so the probe cannot break
+# on a missing busybox applet.
+#
+# Credentials come from the repo's .env, which compose reads automatically for
+# interpolation. DD_API_KEY and AWS_BEARER_TOKEN_BEDROCK use `:?` so a missing
+# value fails immediately with a named variable instead of surfacing later as a
+# 401 from the Datadog exporter or a 403 from Bedrock.
+
+name: tracey-pizzeria
+
+services:
+  # Published on 4318 because the *browser* posts OTLP straight here — that is a
+  # request from the host's origin, not from inside this network, which is also
+  # why collector-config.yaml needs its cors.allowed_origins block.
+  #
+  # No healthcheck, so dependents gate on `service_started` rather than
+  # `service_healthy`. The contrib image is minimal and not guaranteed to carry
+  # a shell or an HTTP client for a probe to invoke, and gating on it buys
+  # little anyway: the OTel SDKs buffer and retry exports, so spans emitted
+  # before the Collector is listening are retried rather than lost.
+  collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ['--config=/etc/otelcol/config.yaml']
+    volumes:
+      - ./collector-config.yaml:/etc/otelcol/config.yaml:ro
+    environment:
+      DD_API_KEY: ${DD_API_KEY:?set DD_API_KEY in .env}
+      DD_SITE: ${DD_SITE:-datadoghq.com}
+    ports:
+      - '4318:4318'
+
+  # inventory and kitchen are deliberately unpublished: only the backend talks
+  # to them, matching the architecture diagram in the README. Reach them with
+  # `docker compose exec` rather than adding a port mapping.
+  inventory:
+    build:
+      context: ./inventory
+      target: dev
+    environment:
+      PORT: 4001
+      OTEL_SERVICE_NAME: tracey-inventory
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318
+      OTEL_LOG_LEVEL: error
+    volumes:
+      - ./inventory/src:/app/src:ro
+      - ./inventory/tsconfig.json:/app/tsconfig.json:ro
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4001/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      collector:
+        condition: service_started
+
+  kitchen:
+    build:
+      context: ./kitchen
+      target: dev
+    environment:
+      PORT: 4002
+      OTEL_SERVICE_NAME: tracey-kitchen
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318
+      OTEL_LOG_LEVEL: error
+    volumes:
+      - ./kitchen/src:/app/src:ro
+      - ./kitchen/tsconfig.json:/app/tsconfig.json:ro
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4002/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      collector:
+        condition: service_started
+
+  # Published on 4000 only as a convenience for curling /healthz and /api/*
+  # directly; the funnel does not need it, since the browser reaches the API
+  # through the frontend's server-side /api proxy.
+  #
+  # OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true is the same
+  # deliberate lab setting `make run-backend` carries: it puts the full prompt
+  # and completion on every LLM span. See the warning in the README before
+  # copying this anywhere real.
+  backend:
+    build:
+      context: ./backend
+      target: dev
+    environment:
+      PORT: 4000
+      OTEL_SERVICE_NAME: tracey-backend
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318
+      OTEL_LOG_LEVEL: error
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: 'true'
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:?set AWS_BEARER_TOKEN_BEDROCK in .env}
+      # Unset is fine — claude.ts falls back to the lab's model id.
+      BEDROCK_MODEL_ID: ${BEDROCK_MODEL_ID:-}
+      INVENTORY_URL: http://inventory:4001
+      KITCHEN_URL: http://kitchen:4002
+    volumes:
+      - ./backend/src:/app/src:ro
+      - ./backend/tsconfig.json:/app/tsconfig.json:ro
+    ports:
+      - '4000:4000'
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4000/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      inventory:
+        condition: service_healthy
+      kitchen:
+        condition: service_healthy
+      collector:
+        condition: service_started
+
+  # VITE_OTEL_COLLECTOR_URL stays on localhost — unlike every other URL here it
+  # is consumed by the *browser*, which resolves it against the host, not this
+  # network. Pointing it at http://collector:4318 would break every browser
+  # export. VITE_API_PROXY_TARGET is the opposite case: it is used by the dev
+  # server inside the container, so it takes the compose service name.
+  #
+  # No healthcheck — nothing depends on the frontend, so there is nothing for a
+  # probe to gate.
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    environment:
+      VITE_DD_RUM_APPLICATION_ID: ${DD_RUM_APPLICATION_ID:?set DD_RUM_APPLICATION_ID in .env}
+      VITE_DD_SITE: ${DD_SITE:-datadoghq.com}
+      VITE_OTEL_COLLECTOR_URL: http://localhost:4318
+      VITE_OTEL_SERVICE_NAME: tracey-frontend
+      VITE_API_PROXY_TARGET: http://backend:4000
+    volumes:
+      - ./frontend/src:/app/src:ro
+      - ./frontend/index.html:/app/index.html:ro
+      - ./frontend/checkout:/app/checkout:ro
+      - ./frontend/payment:/app/payment:ro
+      - ./frontend/tracking:/app/tracking:ro
+      - ./frontend/vite.config.ts:/app/vite.config.ts:ro
+    ports:
+      - '5173:5173'
+    depends_on:
+      backend:
+        condition: service_healthy

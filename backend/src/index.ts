@@ -22,8 +22,8 @@ app.use(express.json());
 
 const tracer = trace.getTracer('tracey.backend');
 
-const INVENTORY_URL = process.env.INVENTORY_URL || 'http://inventory-service:4001';
-const KITCHEN_URL = process.env.KITCHEN_URL || 'http://kitchen-service:4002';
+const INVENTORY_URL = process.env.INVENTORY_URL || 'http://inventory:4001';
+const KITCHEN_URL = process.env.KITCHEN_URL || 'http://kitchen:4002';
 
 const SYSTEM_PROMPT = `
 You are Tracey, the fast-talking, mildly sarcastic AI order-taker at Tracey's Pizzeria.
@@ -66,7 +66,7 @@ async function checkStock(toppings: string[], chaos: boolean) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ toppings, chaos }),
   });
-  if (!res.ok) throw new Error(`inventory-service returned ${res.status}`);
+  if (!res.ok) throw new Error(`inventory returned ${res.status}`);
   return (await res.json()) as { topping: string; available: boolean }[];
 }
 
@@ -76,7 +76,7 @@ async function bakePizza(order: unknown, chaos: boolean, fulfillment: Fulfillmen
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ order, chaos, fulfillment }),
   });
-  if (!res.ok) throw new Error(`kitchen-service returned ${res.status}`);
+  if (!res.ok) throw new Error(`kitchen returned ${res.status}`);
   return (await res.json()) as { orderNumber: string; etaMinutes: number };
 }
 
@@ -401,7 +401,7 @@ app.get('/api/order/:sessionId/status', async (req, res) => {
 
   try {
     const upstream = await fetch(`${KITCHEN_URL}/status/${orderNumber}`);
-    if (!upstream.ok) throw new Error(`kitchen-service returned ${upstream.status}`);
+    if (!upstream.ok) throw new Error(`kitchen returned ${upstream.status}`);
     const status = await upstream.json();
 
     const span = trace.getActiveSpan();

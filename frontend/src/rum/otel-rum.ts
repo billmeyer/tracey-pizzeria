@@ -204,7 +204,7 @@ let activeSdks: RumHandle[] = [];
 
 /**
  * ── OTel-native RUM (replaces @datadog/browser-rum) ─────────────────────
- * Sends OTLP logs + spans straight from the browser to the otel-collector's
+ * Sends OTLP logs + spans straight from the browser to the collector's
  * OTLP receiver (see collector-config.yaml's `otlp` pipeline,
  * which forwards to Datadog's OTLP intake instead of the `datadog` native
  * exporter — the latter doesn't route to RUM).
