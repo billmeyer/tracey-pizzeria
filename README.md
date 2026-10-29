@@ -50,6 +50,8 @@ OTel Collector → Datadog (APM Traces, RUM Sessions, Agent Observability)
 
 Four Node services plus the Collector. Two ways to run them: five local processes with only the Collector containerised (`make run-*`), or all five in containers (`docker compose up`). Both are supported — see Setup.
 
+The three Node services name their instrumentations individually in `instrument.ts` (`http`, `express`, `undici`, `net`, `router`) rather than calling `getNodeAutoInstrumentations()`. Those five are exactly the ones that were emitting spans under the meta-package, so the traces are identical — but the meta-package also pulls 44 other dependencies, including five cloud resource detectors this app never uses, and the GCP one was the last source of deprecated transitive packages. With it gone, `npm install` is clean: no deprecation warnings and no advisories in any service.
+
 ## Setup
 
 1. Copy `.env.example` to `.env` and fill in:

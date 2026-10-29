@@ -4,7 +4,11 @@ import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
-import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
+import { ExpressInstrumentation } from '@opentelemetry/instrumentation-express';
+import { UndiciInstrumentation } from '@opentelemetry/instrumentation-undici';
+import { NetInstrumentation } from '@opentelemetry/instrumentation-net';
+import { RouterInstrumentation } from '@opentelemetry/instrumentation-router';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 
@@ -33,7 +37,27 @@ const sdk = new NodeSDK({
       exportIntervalMillis: 10_000,
     }),
   ],
-  instrumentations: [getNodeAutoInstrumentations()],
+  // Named individually rather than via getNodeAutoInstrumentations().
+  //
+  // These five are exactly the ones that were emitting spans under the
+  // meta-package — verified by reading the InstrumentationScope values the
+  // Collector received — so the traces are unchanged. What goes away is the
+  // other 44 dependencies it pulls in, including five cloud resource
+  // detectors this app never uses. The GCP one was the last source of
+  // deprecated transitive packages (gcp-metadata -> gaxios -> node-fetch ->
+  // node-domexception, and -> rimraf -> glob), and no version bump could fix
+  // that: even the latest gaxios still depends on node-fetch.
+  //
+  // undici is the one to not drop by accident: it instruments fetch, which is
+  // how the backend reaches inventory and kitchen, and therefore how
+  // traceparent propagates across services.
+  instrumentations: [
+    new HttpInstrumentation(),
+    new ExpressInstrumentation(),
+    new UndiciInstrumentation(),
+    new NetInstrumentation(),
+    new RouterInstrumentation(),
+  ],
 });
 
 sdk.start();
