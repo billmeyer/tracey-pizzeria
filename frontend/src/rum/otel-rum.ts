@@ -86,6 +86,23 @@ const TRACES_SCHEDULED_DELAY_MS = 2000;
 const LOGS_SCHEDULED_DELAY_MS = 1000;
 
 /**
+ * Matches this app's own OTLP export requests, whatever shape their URL takes.
+ *
+ * Shared by all three instrumentations that must not report on exports —
+ * ResourceTiming, Fetch and Xhr — because each of them creates a feedback loop
+ * if it sees them (see the ResourceTiming note below for the measured damage).
+ *
+ * Deliberately a path-only regex rather than an absolute URL. `ignoreUrls`
+ * partial-matches regexes but requires *exact* matches for strings, so the
+ * absolute `http://localhost:4318/v1/traces` strings this replaced silently
+ * stopped matching the moment the exporter URL changed — which is exactly what
+ * happened when exports moved behind the dev server's `/otlp` proxy. A pattern
+ * keyed on the OTLP path suffix matches `http://localhost:4318/v1/traces`,
+ * `/otlp/v1/traces`, and anything else the endpoint is pointed at.
+ */
+const OTLP_EXPORT_URL_PATTERN = /\/v1\/(traces|logs|metrics)(\?|$)/;
+
+/**
  * URLs `ResourceTimingInstrumentation` must not report on.
  *
  * The OTLP endpoints are the important entry, and not merely for tidiness:
@@ -103,7 +120,7 @@ const LOGS_SCHEDULED_DELAY_MS = 1000;
  * production build still reports its actual bundles.
  */
 const RESOURCE_TIMING_IGNORE_URLS: RegExp[] = [
-    /\/v1\/(traces|logs|metrics)(\?|$)/,
+    OTLP_EXPORT_URL_PATTERN,
     ...(import.meta.env.DEV
         ? [/\/node_modules\//, /\/@vite\//, /\/@react-refresh/, /\/src\/.+\.(ts|tsx|css)(\?|$)/]
         : []),
@@ -229,7 +246,33 @@ let activeSdks: RumHandle[] = [];
  */
 export async function initOtelRum(options: InitOtelRumOptions): Promise<void> {
     const applicationId = import.meta.env.VITE_DD_RUM_APPLICATION_ID || 'YOUR_RUM_APPLICATION_ID';
-    const collectorUrl = import.meta.env.VITE_OTEL_COLLECTOR_URL || 'http://localhost:4318';
+    // Relative by default: exports go to the dev server's `/otlp` proxy, which
+    // forwards to the Collector (see vite.config.ts). Same-origin, so the
+    // browser issues no CORS preflight — which matters because an OTLP POST can
+    // never be a CORS "simple request" (its content type is application/json or
+    // x-protobuf), so a cross-origin endpoint must answer a preflight for every
+    // export. Going through the proxy also means the Collector needs no
+    // published port and the page works unchanged when served to a remote
+    // browser, where `localhost:4318` would resolve to the viewer's own machine.
+    //
+    // Set VITE_OTEL_COLLECTOR_URL to an absolute URL to bypass the proxy and
+    // post straight at a Collector; its cors.allowed_origins must then list this
+    // page's origin.
+    //
+    // Resolved against the page origin rather than passed through as the bare
+    // relative path, and that is load-bearing: startTracesSdk and startLogsSdk
+    // gate the OTLP exporter behind `if (URL.parse(endpoint))`, and URL.parse
+    // returns null for a relative URL with no base. A bare "/otlp" therefore
+    // *silently* skips the batch processor — no error, the console exporter
+    // keeps printing, and nothing ever reaches the Collector. Resolving here
+    // yields an absolute same-origin URL, which satisfies that check while
+    // still avoiding the preflight. An already-absolute value passes through
+    // unchanged; the trailing-slash strip stops `http://host/` + `/v1/traces`
+    // from becoming a double slash.
+    const collectorUrl = new URL(
+        import.meta.env.VITE_OTEL_COLLECTOR_URL || '/otlp',
+        window.location.origin,
+    ).href.replace(/\/$/, '');
     const serviceName = import.meta.env.VITE_OTEL_SERVICE_NAME || 'tracey-frontend';
     const serviceVersion = import.meta.env.VITE_OTEL_SERVICE_VERSION || '0.0.1';
 
@@ -365,12 +408,12 @@ export async function initOtelRum(options: InitOtelRumOptions): Promise<void> {
             // instrumentation buys nothing but patched globals.
             new FetchInstrumentation({
                 propagateTraceHeaderCorsUrls: [/.*/],
-                ignoreUrls: ["http://localhost:4318/v1/traces", "http://localhost:4318/v1/logs"],
+                ignoreUrls: [OTLP_EXPORT_URL_PATTERN],
             }),
 
             new XhrInstrumentation({
                 propagateTraceHeaderCorsUrls: [/.*/],
-                ignoreUrls: ["http://localhost:4318/v1/traces", "http://localhost:4318/v1/logs"],
+                ignoreUrls: [OTLP_EXPORT_URL_PATTERN],
             }),
         ],
     });

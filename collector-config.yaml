@@ -7,10 +7,15 @@ receivers:
     protocols:
       http:
         endpoint: 0.0.0.0:4318
-        # Load-bearing — do not delete. The browser posts OTLP straight to
-        # this port (no proxy), and the page is served from a different port,
-        # so every browser export is a cross-origin request that fails
-        # preflight without this list.
+        # No longer on the default path, but kept as the fallback.
+        #
+        # Browser exports now go through the dev server's /otlp proxy, which
+        # makes them same-origin — so they need no CORS at all. This list only
+        # matters if VITE_OTEL_COLLECTOR_URL is set to an absolute URL to post
+        # straight at this port, bypassing the proxy. In that case it is
+        # load-bearing again: an OTLP POST can never be a CORS "simple request"
+        # (its content type is application/json or x-protobuf), so every export
+        # preflights and fails without the origin listed here.
         #   :5173  `make run-frontend` pins this with --strictPort
         #   :5174  Vite's fallback, for anyone running `npm run dev` by hand
         cors:

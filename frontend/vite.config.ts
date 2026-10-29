@@ -55,6 +55,25 @@ export default defineConfig(({mode}) => {
                 // only ever talks to :5173, which is why the backend's port
                 // needs no publishing for the funnel to work.
                 '/api': process.env.VITE_API_PROXY_TARGET || 'http://localhost:4000',
+
+                // Browser OTLP exports. Same reasoning as /api — localhost on
+                // the host path, the compose service name under compose — but
+                // this one also exists to make the exports *same-origin*.
+                //
+                // An OTLP POST can never be a CORS "simple request": its
+                // content type is application/json or x-protobuf, neither of
+                // which is on the simple-request allowlist. So any cross-origin
+                // Collector has to answer a preflight for every export, and a
+                // remote viewer's `localhost:4318` would point at their own
+                // machine rather than the host running the stack. Proxying
+                // sidesteps both.
+                //
+                // The rewrite strips the prefix, so /otlp/v1/traces reaches the
+                // Collector as /v1/traces.
+                '/otlp': {
+                    target: process.env.VITE_OTLP_PROXY_TARGET || 'http://localhost:4318',
+                    rewrite: (path: string) => path.replace(/^\/otlp/, ''),
+                },
             },
         },
 

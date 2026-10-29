@@ -158,14 +158,17 @@ run-kitchen:
 	npm run dev
 
 # --strictPort so a port clash fails loudly instead of silently starting on
-# 5174. The page's origin has to stay http://localhost:5173: it is baked into
-# the lab guide, and it has to match the Collector's cors.allowed_origins or
-# every browser OTLP export fails preflight — which reads as a broken lab
-# rather than a port collision.
+# 5174, which the lab guide's http://localhost:5173 would then not match.
+#
+# VITE_OTEL_COLLECTOR_URL is the relative /otlp path, so browser exports go
+# through this dev server and on to VITE_OTLP_PROXY_TARGET. Being same-origin,
+# they need no CORS preflight and no published Collector port — see the /otlp
+# block in vite.config.ts.
 run-frontend:
 	cd frontend && \
 	VITE_DD_RUM_APPLICATION_ID=$${DD_RUM_APPLICATION_ID} \
 	VITE_DD_SITE=$${DD_SITE} \
-	VITE_OTEL_COLLECTOR_URL=http://localhost:4318 \
+	VITE_OTEL_COLLECTOR_URL=/otlp \
+	VITE_OTLP_PROXY_TARGET=http://localhost:4318 \
 	VITE_OTEL_SERVICE_NAME=tracey-frontend \
 	npm run dev -- --host 0.0.0.0 --port 5173 --strictPort

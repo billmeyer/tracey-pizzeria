@@ -158,9 +158,10 @@ services:
     environment:
       VITE_DD_RUM_APPLICATION_ID: ${DD_RUM_APPLICATION_ID:?set DD_RUM_APPLICATION_ID in .env}
       VITE_DD_SITE: ${DD_SITE:-datadoghq.com}
-      VITE_OTEL_COLLECTOR_URL: http://localhost:4318
+      VITE_OTEL_COLLECTOR_URL: /otlp
       VITE_OTEL_SERVICE_NAME: tracey-frontend
       VITE_API_PROXY_TARGET: http://backend:4000
+      VITE_OTLP_PROXY_TARGET: http://collector:4318
     volumes:
       - ./frontend/src:/app/src:ro
       - ./frontend/index.html:/app/index.html:ro

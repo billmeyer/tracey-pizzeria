@@ -32,8 +32,8 @@ Browser (React MPA + OTel browser SDK, tracecontext propagator)
    │  4 documents, hard transitions, one RUM session
    │  /api/* proxied to the backend same-origin by Vite's dev server
    │
-   ├──► OTLP logs + spans POSTed straight to localhost:4318 (the Collector's
-   │    published port — no proxy, hence the CORS block in its config)
+   ├──► OTLP logs + spans POSTed to /otlp on the dev server, which proxies
+   │    them to the Collector — same-origin, so no CORS preflight
    ▼
 Backend: tracey-backend (Node/Express + OTel SDK)
    │  spans on span-end, plus gen_ai.* metrics pushed to /v1/metrics every 10s
@@ -175,12 +175,28 @@ Two environment variables are deliberately asymmetric, and getting them backward
 
 | Variable | Value | Why |
 |---|---|---|
-| `VITE_OTEL_COLLECTOR_URL` | `http://localhost:4318` | Consumed by the **browser**, which resolves it against the host — not the compose network. Pointing it at `http://collector:4318` breaks every browser OTLP export. |
 | `VITE_API_PROXY_TARGET` | `http://backend:4000` | Consumed by the Vite dev server **inside** the container, where `localhost` is the frontend itself. |
+| `VITE_OTLP_PROXY_TARGET` | `http://collector:4318` | Same — the dev server resolves it, so it takes the compose service name. |
+| `VITE_OTEL_COLLECTOR_URL` | `/otlp` | Consumed by the **browser**, and deliberately relative so exports stay same-origin. See *Why browser OTLP goes through a proxy* below. |
 
-Ports: `5173` (frontend) and `4318` (Collector, because the browser posts to it directly) are required. `4000` is published only for curling the API. `inventory` and `kitchen` stay internal, matching the architecture diagram — reach them with `docker compose exec`.
+Ports: only `5173` (frontend) is required now that browser exports are proxied. `4318` and `4000` are published for convenience — curling the Collector and the API directly — not because anything depends on them. `inventory` and `kitchen` stay internal, matching the architecture diagram — reach them with `docker compose exec`.
 
 Credentials come from the same `.env`, which compose reads automatically. `DD_API_KEY`, `DD_RUM_APPLICATION_ID`, and `AWS_BEARER_TOKEN_BEDROCK` are declared with `:?`, so a missing one fails immediately naming the variable instead of surfacing later as a 401 from the Datadog exporter or a 403 from Bedrock.
+
+## Why browser OTLP goes through a proxy
+
+The browser does not post to the Collector directly. `VITE_OTEL_COLLECTOR_URL` is the relative path `/otlp`, and `vite.config.ts` proxies `/otlp/*` to the Collector (`VITE_OTLP_PROXY_TARGET`, stripping the prefix), exactly as it already does for `/api`. Three reasons:
+
+1. **An OTLP POST can never be a CORS "simple request."** Its content type is `application/json` or `x-protobuf`, and only `text/plain`, `multipart/form-data` and `application/x-www-form-urlencoded` are exempt. So a cross-origin Collector must answer a preflight for *every* export. Same-origin removes that entirely.
+2. **It works when the page is served to a remote browser.** `http://localhost:4318` is resolved by the *browser*, so for anyone not sitting on the host it points at their own machine. A relative path follows the page.
+3. **The Collector needs no published port**, and `collector-config.yaml`'s `cors.allowed_origins` stops being load-bearing — it is now only the fallback for pointing `VITE_OTEL_COLLECTOR_URL` at an absolute URL.
+
+Two implementation details that are easy to get wrong, both verified against a real browser:
+
+| Trap | What happens |
+|---|---|
+| Passing the bare relative path to the SDK | `startTracesSdk` / `startLogsSdk` gate the exporter behind `if (URL.parse(endpoint))`, and `URL.parse` returns `null` for a relative URL with no base — so the batch processor is **silently never added**. No error, the console exporter keeps printing, and nothing reaches the Collector. `otel-rum.ts` resolves the value against `window.location.origin` first, which keeps it same-origin *and* absolute. |
+| Leaving the export-ignore list as absolute URLs | `ignoreUrls` partial-matches regexes but requires **exact** matches for strings, so the old hardcoded `http://localhost:4318/v1/traces` entries stopped matching once exports moved to `/otlp/...`. Every export would then generate a Fetch/XHR span, which exports, which generates more. All three instrumentations now share one path-keyed regex, `OTLP_EXPORT_URL_PATTERN`. |
 
 ## Local dev without Docker
 
