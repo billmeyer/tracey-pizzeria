@@ -111,6 +111,7 @@ run-collector: check-collector-config
 		-v $(CURDIR)/collector-config.yaml:/etc/otelcol/config.yaml:ro \
 		-e DD_API_KEY=$${DD_API_KEY} \
 		-e DD_SITE=$${DD_SITE} \
+		-e RUM_ALLOWED_ORIGIN=$${RUM_ALLOWED_ORIGIN:-http://localhost:5173} \
 		otel/opentelemetry-collector-contrib:latest \
 		--config=/etc/otelcol/config.yaml
 

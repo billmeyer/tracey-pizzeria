@@ -1,7 +1,6 @@
 import './instrument'; // must be the very first import — see instrument.ts
 
 import express from 'express';
-import cors from 'cors';
 import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 // Same package and same /incubating entry point as claude.ts: the convention
 // travels with the constants, not with the file that happens to use them. The
@@ -17,7 +16,20 @@ import { getSession, hasSession, resetSession, Address, Fulfillment } from './st
 import { priceOrder } from './pricing';
 
 const app = express();
-app.use(cors());
+
+// No CORS middleware, deliberately.
+//
+// This used to be a bare `app.use(cors())`, which answers every request with
+// `Access-Control-Allow-Origin: *` — on an API that mutates orders and takes
+// card numbers. It was never needed: the browser reaches `/api/*` through the
+// frontend dev server's same-origin proxy (see vite.config.ts), so those
+// requests are not cross-origin and never consult CORS at all.
+//
+// Port 4000 is published for curl and `docker compose exec`, neither of which
+// enforces CORS, so nothing in the supported flow regressed by removing it.
+// If a future chapter does need a browser on another origin to call this API
+// directly, add `cors()` back with an explicit `origin` allowlist rather than
+// the wildcard default.
 app.use(express.json());
 
 const tracer = trace.getTracer('tracey.backend');

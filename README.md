@@ -191,6 +191,10 @@ The browser does not post to the Collector directly. `VITE_OTEL_COLLECTOR_URL` i
 2. **It works when the page is served to a remote browser.** `http://localhost:4318` is resolved by the *browser*, so for anyone not sitting on the host it points at their own machine. A relative path follows the page.
 3. **The Collector needs no published port**, and `collector-config.yaml`'s `cors.allowed_origins` stops being load-bearing — it is now only the fallback for pointing `VITE_OTEL_COLLECTOR_URL` at an absolute URL.
 
+Because exports resolve against `window.location.origin`, this works unchanged when the page is served from an Instruqt hostname or a LAN address — there is no origin to allowlist. On the absolute-URL fallback there *is*: set `RUM_ALLOWED_ORIGIN` in `.env` to the origin serving the page and the Collector will accept its preflights, without widening to a wildcard.
+
+There is also no CORS middleware on the backend. It used to run a bare `app.use(cors())`, answering every request with `Access-Control-Allow-Origin: *` on an API that mutates orders and takes card numbers; the proxy means the browser never calls it cross-origin, so it was removed along with the now-unused `cors` dependency.
+
 Two implementation details that are easy to get wrong, both verified against a real browser:
 
 | Trap | What happens |

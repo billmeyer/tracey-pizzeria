@@ -38,6 +38,9 @@ services:
     environment:
       DD_API_KEY: ${DD_API_KEY:?set DD_API_KEY in .env}
       DD_SITE: ${DD_SITE:-datadoghq.com}
+      # Only consulted on the absolute-URL fallback path; see the cors block in
+      # collector-config.yaml. Harmless when unset.
+      RUM_ALLOWED_ORIGIN: ${RUM_ALLOWED_ORIGIN:-http://localhost:5173}
     ports:
       - '4318:4318'
 
