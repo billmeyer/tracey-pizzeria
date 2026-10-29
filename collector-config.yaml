@@ -35,6 +35,23 @@ receivers:
             - "*"
 
 processors:
+  # Health checks are pure noise here: Compose polls /healthz on all three
+  # services every few seconds, and each poll produces a server span plus the
+  # Express middleware spans beneath it. Left in, they bury the spans the
+  # workshop actually cares about in the debug exporter's output.
+  #
+  # Matching on http.route rather than the span name catches the children too —
+  # the Express instrumentation stamps the route onto its middleware and
+  # request-handler spans, which are named "middleware - ..." rather than
+  # "GET /healthz". The name check is the fallback for any span that carries no
+  # route attribute.
+  filter/healthz:
+    error_mode: ignore
+    traces:
+      span:
+        - 'attributes["http.route"] == "/healthz"'
+        - 'name == "GET /healthz"'
+
   batch:
     timeout: 5s
     send_batch_size: 512
@@ -58,7 +75,8 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch]
+      # filter before batch so dropped spans never take up room in a batch.
+      processors: [filter/healthz, batch]
       exporters:
         - debug
         - otlp_http/datadog

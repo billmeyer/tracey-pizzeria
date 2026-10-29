@@ -11,7 +11,11 @@ import {
   ATTR_GEN_AI_TOOL_TYPE,
   GEN_AI_OPERATION_NAME_VALUE_EXECUTE_TOOL,
 } from '@opentelemetry/semantic-conventions/incubating';
-import { callClaude, ClaudeMessage, ClaudeTool, ClaudeToolResult } from './claude';
+
+// callClaudeWithGenAI, not the plain callClaude: the chat endpoint is the one
+// the lab's traces are built around, so it takes the instrumented path. The
+// uninstrumented sibling is there to be swapped in for the Section 1 exercise.
+import { callClaudeWithGenAI, ClaudeMessage, ClaudeTool, ClaudeToolResult } from './claude';
 import { getSession, hasSession, resetSession, Address, Fulfillment } from './state';
 import { priceOrder } from './pricing';
 
@@ -117,7 +121,7 @@ app.post('/api/chat', async (req, res) => {
     const MAX_TOOL_ROUNDS = 4;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const response = await callClaude(SYSTEM_PROMPT, session.history, TOOLS);
+      const response = await callClaudeWithGenAI(SYSTEM_PROMPT, session.history, TOOLS);
       session.history.push({ role: 'assistant', content: response.content });
 
       const roundText = response.content
