@@ -245,6 +245,32 @@ let activeSdks: RumHandle[] = [];
  * ─────────────────────────────────────────────────────────────────────────
  */
 export async function initOtelRum(options: InitOtelRumOptions): Promise<void> {
+    // Browser-side counterpart to OTEL_SDK_DISABLED, and it has to exist
+    // separately: that variable is read by the *Node* SDK's constructor, so
+    // setting it on a service does nothing for the two SDKs started here.
+    // Nothing in the browser reads process env at all — Vite inlines VITE_*
+    // at serve/build time, which is why the name carries the prefix.
+    //
+    // Without this gate there is no way to run the app with no telemetry at
+    // all: bootstrap.tsx calls initOtelRum on every document, so both SDKs
+    // start, and the batch processors then POST to the collector endpoint
+    // every 1-2s whether or not anything is listening. In the workshop's
+    // Chapter 01 — the deliberately uninstrumented "before" state — that
+    // surfaced as a stream of `[vite] http proxy error: /v1/logs
+    // ECONNREFUSED` in the dev server log, which is both noise and a
+    // contradiction of what that chapter is demonstrating.
+    //
+    // Returning before anything starts leaves the app fully functional and
+    // genuinely silent: `flushRum` no-ops on an empty `activeSdks`, and any
+    // `logger.emit` from events.ts goes to the API's no-op provider, so no
+    // caller needs to know this happened.
+    if (import.meta.env.VITE_OTEL_SDK_DISABLED === 'true') {
+        console.info(
+            '[rum] VITE_OTEL_SDK_DISABLED=true — browser telemetry is off, no SDK started'
+        );
+        return;
+    }
+
     const applicationId = import.meta.env.VITE_DD_RUM_APPLICATION_ID || 'YOUR_RUM_APPLICATION_ID';
     // Relative by default: exports go to the dev server's `/otlp` proxy, which
     // forwards to the Collector (see vite.config.ts). Same-origin, so the
