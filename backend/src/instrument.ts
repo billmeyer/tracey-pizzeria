@@ -21,12 +21,18 @@ const sdk = new NodeSDK({
   // and aggregated in-process in between. 10s is for lab impatience —
   // production is 60s. Note /v1/metrics is a distinct OTLP endpoint, which is
   // why collector-config.yaml carries a separate `metrics` pipeline.
-  metricReader: new PeriodicExportingMetricReader({
-    exporter: new OTLPMetricExporter({
-      url: `${collectorBase}/v1/metrics`,
+  //
+  // Plural, and an array: `metricReader` was renamed `metricReaders` in
+  // sdk-node 0.300. One reader is still the normal case — the array exists so
+  // a process can fan the same meters out to several backends.
+  metricReaders: [
+    new PeriodicExportingMetricReader({
+      exporter: new OTLPMetricExporter({
+        url: `${collectorBase}/v1/metrics`,
+      }),
+      exportIntervalMillis: 10_000,
     }),
-    exportIntervalMillis: 10_000,
-  }),
+  ],
   instrumentations: [getNodeAutoInstrumentations()],
 });
 

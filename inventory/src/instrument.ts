@@ -10,7 +10,7 @@ const collectorBase = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://collect
 
 const sdk = new NodeSDK({
   resource: resourceFromAttributes({
-    [ATTR_SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || 'tracey-backend',
+    [ATTR_SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || 'tracey-inventory',
   }),
   traceExporter: new OTLPTraceExporter({
     url: `${collectorBase}/v1/traces`,
