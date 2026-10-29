@@ -1,5 +1,7 @@
 .env
 .idea/
 node_modules/
-frontend/dist/
-backend/dist/
+# Any service's build output: backend, inventory and kitchen all set
+# outDir: dist, and Vite writes frontend/dist. None of it is ever committed —
+# the production images build their own copy inside the container.
+dist/

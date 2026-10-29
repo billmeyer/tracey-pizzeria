@@ -23,7 +23,8 @@ export
 
 .PHONY: help install install-backend install-frontend install-inventory install-kitchen \
 	check-collector-config run-stack \
-	run-collector run-backend run-frontend run-inventory run-kitchen
+	run-collector run-backend run-frontend run-inventory run-kitchen \
+	clean clean-deps
 
 help:
 	@echo "Targets:"
@@ -40,6 +41,10 @@ help:
 	@echo "  make run-stack              all five services, dependencies ordered for you"
 	@echo ""
 	@echo "Then open http://localhost:5173 in the browser."
+	@echo ""
+	@echo "Housekeeping:"
+	@echo "  make clean                  Delete build output and caches (keeps node_modules)"
+	@echo "  make clean-deps             clean, plus every node_modules — needs make install after"
 
 # The four installs are independent, so `make install` fans them out rather
 # than running them end to end. It does that by re-entering make with -j4
@@ -70,6 +75,36 @@ install-inventory:
 
 install-kitchen:
 	cd kitchen && npm install
+
+# Everything below is generated and safe to delete. None of it is needed to run
+# the workshop: all three Node services run from TypeScript via `tsx watch` and
+# the frontend runs under Vite's dev server, so the dist/ directories only ever
+# appear when someone runs `npm run build` by hand — typechecking, usually. The
+# production Docker stage builds its own dist/ inside the image and never reads
+# the host's.
+#
+# Deliberately *not* touched here: .env (your credentials), and anything Docker
+# holds — images, volumes, the collector container. `docker compose down -v`
+# and `docker image prune` are the tools for that, and quietly running them
+# from a `clean` target would be a nasty surprise mid-lab.
+CLEAN_PATHS := backend/dist frontend/dist inventory/dist kitchen/dist \
+	frontend/node_modules/.vite
+
+clean:
+	@rm -rf $(CLEAN_PATHS)
+	@echo "Removed build output and caches. node_modules left in place."
+
+# The deeper clean, for a genuinely fresh start — a half-installed tree, a
+# corrupt dependency, or reclaiming the better part of a gigabyte. Separate
+# from `clean` because it costs a full `make install` to undo, which is a slow
+# and network-dependent thing to trigger by accident.
+#
+# The bare `node_modules` is the repo root's own: npm creates one there for
+# anything installed outside the four service directories.
+clean-deps: clean
+	@rm -rf node_modules backend/node_modules frontend/node_modules \
+		inventory/node_modules kitchen/node_modules
+	@echo "Removed all node_modules. Run 'make install' before the run-* targets."
 
 # Shared by run-collector and run-stack, because both bind-mount
 # collector-config.yaml and both hit the same hazard if it is missing.
