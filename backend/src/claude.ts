@@ -74,7 +74,7 @@ export type ClaudeToolResult = Anthropic.ToolResultBlockParam;
 export type ClaudeToolUse = Anthropic.ToolUseBlock;
 
 /**
- * The request both `callClaude` and `callClaudeWithGenAI` send.
+ * The request `callClaude` sends.
  *
  * Narrowed from the SDK's own param type on one field: `system` there is a
  * string *or* an array of text blocks, and pinning it to the string this app
@@ -85,66 +85,28 @@ export type ClaudeRequest = Omit<Anthropic.MessageCreateParamsNonStreaming, 'sys
   system: string;
 };
 
-function buildRequest(
-  system: string,
-  messages: ClaudeMessage[],
-  tools: ClaudeTool[]
-): ClaudeRequest {
-  return {
-    model: MODEL,
-    max_tokens: 1024,
-    system,
-    messages,
-    tools,
-  };
-}
-
 /**
- * ── WORKSHOP EXERCISE 1 (Section 1) ─────────────────────────────────────
- * The instrumented path. `withGenAISpan` opens a gen_ai.* client span around
- * the call and records the GenAI spans and metrics the lab guide walks
- * through; see claude-instrumentation.ts for all of it.
+ * One turn of the conversation, sent to Claude on Bedrock.
  *
- * Read this against the plain `callClaude` below: same request, same
- * response, one wrapper between them. That is the shape to aim for in your own
- * services — instrumentation you can see at the call site and delete in one
- * line, not a tracer threaded through the business logic.
- * ─────────────────────────────────────────────────────────────────────────
- */
-export async function callClaudeWithGenAI(
-  system: string,
-  messages: ClaudeMessage[],
-  tools: ClaudeTool[]
-): Promise<ClaudeResponse> {
-  const request = buildRequest(system, messages, tools);
-
-  return withGenAISpan(request, (req) => anthropic.messages.create(req));
-}
-
-/**
- * The same Bedrock call as `callClaudeWithGenAI`, with no manual instrumentation at
- * all. The request it sends and the response it returns are identical — the
- * shared `buildRequest` is what guarantees that.
- *
- * It is the "before" half of the Section 1 exercise, and it carries the plain
- * name on purpose: this is what calling an LLM looks like before anyone
- * thinks about observability. Point the chat endpoint at it, look at the
- * trace, and the call is simply absent — the request handler shows a
- * multi-second gap with nothing in it, no model, no token counts, nothing to
- * attribute cost or latency to. Switch to `callClaudeWithGenAI` and that gap
- * becomes the span.
- *
- * One caveat worth saying out loud, because it is visible in the trace: this
- * is not *zero* telemetry. The HTTP instrumentation still records the outbound
- * POST to Bedrock as a client span, so you get a URL and a status code. What
- * you lose is everything that makes it an LLM call rather than an HTTP call.
+ * `withGenAISpan` is the single line of observability in this file: it opens
+ * the gen_ai.* client span and records both GenAI metrics around the call, and
+ * all of that lives in claude-instrumentation.ts. Remove the wrapper and this
+ * is a bare `anthropic.messages.create(request)` — which is the shape to aim
+ * for in your own services, instrumentation you can see at the call site and
+ * delete in one line rather than a tracer threaded through the logic.
  */
 export async function callClaude(
   system: string,
   messages: ClaudeMessage[],
   tools: ClaudeTool[]
 ): Promise<ClaudeResponse> {
-  const request = buildRequest(system, messages, tools);
+  const request: ClaudeRequest = {
+    model: MODEL,
+    max_tokens: 1024,
+    system,
+    messages,
+    tools,
+  };
 
-  return anthropic.messages.create(request);
+  return withGenAISpan(request, (req) => anthropic.messages.create(req));
 }
