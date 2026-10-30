@@ -52,7 +52,7 @@ let pageSpanContext: SpanContext | undefined;
  *    context is the non-recording default;
  *  - after `await sessionManager.start()`, because starting a span reads
  *    `getSessionId()`, which mints and persists a new session if the restore
- *    has not resolved yet. See the comment at the call site in otel-rum.ts.
+ *    has not resolved yet. See the comment at the call site in otel.ts.
  */
 export function startPageTrace(routeId: string): SpanContext {
   const span = trace

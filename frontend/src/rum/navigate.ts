@@ -1,5 +1,5 @@
 import { emitStepCompletedAction, STEP_PATHS, type Step } from './events';
-import { flushRum } from './otel-rum';
+import { flushRum } from './otel';
 
 /**
  * ── Hard page transition ──────────────────────────────────────────────────

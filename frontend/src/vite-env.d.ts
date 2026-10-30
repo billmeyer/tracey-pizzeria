@@ -9,7 +9,7 @@ interface ImportMetaEnv {
   readonly VITE_OTEL_SERVICE_VERSION: string;
   /**
    * Browser-side counterpart to the Node SDK's OTEL_SDK_DISABLED. "true"
-   * stops `initOtelRum` before it starts either browser SDK. See otel-rum.ts.
+   * stops `initOtelRum` before it starts either browser SDK. See otel.ts.
    */
   readonly VITE_OTEL_SDK_DISABLED: string;
 }

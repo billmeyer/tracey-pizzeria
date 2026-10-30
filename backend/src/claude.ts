@@ -65,6 +65,15 @@ export type ClaudeResponse = Anthropic.Message;
 export type ClaudeToolResult = Anthropic.ToolResultBlockParam;
 
 /**
+ * One `tool_use` block as it comes back from Claude.
+ *
+ * Exported for the same reason as `ClaudeToolResult`: the agent loop passes a
+ * whole block to `withToolSpan`, and the instrumentation needs a name for the
+ * shape it reads `name` / `id` off.
+ */
+export type ClaudeToolUse = Anthropic.ToolUseBlock;
+
+/**
  * The request both `callClaude` and `callClaudeWithGenAI` send.
  *
  * Narrowed from the SDK's own param type on one field: `system` there is a

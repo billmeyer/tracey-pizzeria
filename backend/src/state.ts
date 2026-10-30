@@ -58,6 +58,9 @@ export interface OrderState {
   } | null;
 }
 
+/** What the kitchen hands back once an order is actually placed. */
+export type Receipt = NonNullable<OrderState['receipt']>;
+
 export interface Session {
   history: ClaudeMessage[];
   order: OrderState;

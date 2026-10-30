@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { initOtelRum } from './rum/otel-rum';
+import { initOtelRum } from './rum/otel';
 import { emitStepEntered, stepIndex, type Step } from './rum/events';
 import { setOrderContext } from './rum/order-context';
 import { isChaos, publishOrderContext, readCachedOrder } from './lib/order';

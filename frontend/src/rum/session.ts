@@ -20,7 +20,7 @@ import type { SessionManager } from '@opentelemetry/browser-sdk/session';
  *     `onSessionStarted` during `sessionManager.start()`. Doing both is what
  *     makes the hook correct regardless of mount timing.
  *
- * Sessions roll over (15 min inactivity, 4h max — see otel-rum.ts), and
+ * Sessions roll over (15 min inactivity, 4h max — see otel.ts), and
  * `onSessionStarted` fires for the new one, so subscribers stay accurate
  * rather than pinning the id they first saw.
  * ──────────────────────────────────────────────────────────────────────────

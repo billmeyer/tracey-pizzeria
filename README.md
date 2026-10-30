@@ -12,7 +12,7 @@ order chat      pickup or         fake card         received → making →
                                                     delivered
 ```
 
-The tracking stages diverge at the hand-off (`kitchen/src/index.ts` → `DELIVERY_STAGES` / `PICKUP_STAGES`): a delivery order ends `out_for_delivery → delivered`, a pickup order ends at `ready_for_pickup`. Each stage holds for `STAGE_DURATION_MS` (9s), so a full funnel finishes while you're still talking about it. `frontend/src/lib/order.ts` maps the stage ids to the labels and icons the page shows (`baking` → "In the oven").
+The tracking stages diverge at the hand-off (`kitchen/src/oven.ts` → `DELIVERY_STAGES` / `PICKUP_STAGES`): a delivery order ends `out_for_delivery → delivered`, a pickup order ends at `ready_for_pickup`. Each stage holds for `STAGE_DURATION_MS` (9s), so a full funnel finishes while you're still talking about it. `frontend/src/lib/order.ts` maps the stage ids to the labels and icons the page shows (`baking` → "In the oven").
 
 Each arrow is a **hard page transition** (`location.assign`), not client-side routing. That is deliberate: a real browser unload/load means every step reports its *own* `browser.navigation_timing`, its *own* Core Web Vitals, and its *own* resource timings. With a SPA router the SDK can only emit a `browser.navigation` marker, and the navigation/vitals numbers stay pinned to the first document forever — so there is nothing per-step to compare.
 
@@ -22,7 +22,7 @@ Two details make this work, and both are easy to get wrong:
 
 | Concern                                        | Where                              | Why                                                                                                                                                                                                              |
 |------------------------------------------------|------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Events emitted just before navigating are lost | `rum/otel-rum.ts` → `flushRum()`   | Both SDKs export on a timer and neither installs a `pagehide` flush, so `traceys.pizzeria.funnel.step_completed` would be discarded with the document. `hardNavigate` awaits a flush *before* `location.assign`. |
+| Events emitted just before navigating are lost | `rum/otel.ts` → `flushRum()`   | Both SDKs export on a timer and neither installs a `pagehide` flush, so `traceys.pizzeria.funnel.step_completed` would be discarded with the document. `hardNavigate` awaits a flush *before* `location.assign`. |
 | Clicks land on a button's child span           | `App.css` → `pointer-events: none` | `UserActionInstrumentation` reads `data-otel-*` off the **event target**, so a click on an icon arrives with no action name.                                                                                     |
 
 ## Architecture
@@ -50,7 +50,7 @@ OTel Collector → Datadog (APM Traces, RUM Sessions, Agent Observability)
 
 Four Node services plus the Collector. Two ways to run them: five local processes with only the Collector containerised (`make run-*`), or all five in containers (`docker compose up`). Both are supported — see Setup.
 
-The three Node services name their instrumentations individually in `instrument.ts` (`http`, `express`, `undici`, `net`, `router`) rather than calling `getNodeAutoInstrumentations()`. Those five are exactly the ones that were emitting spans under the meta-package, so the traces are identical — but the meta-package also pulls 44 other dependencies, including five cloud resource detectors this app never uses, and the GCP one was the last source of deprecated transitive packages. With it gone, `npm install` is clean: no deprecation warnings and no advisories in any service.
+The three Node services name their instrumentations individually in `otel.ts` (`http`, `express`, `undici`, `net`, `router`) rather than calling `getNodeAutoInstrumentations()`. Those five are exactly the ones that were emitting spans under the meta-package, so the traces are identical — but the meta-package also pulls 44 other dependencies, including five cloud resource detectors this app never uses, and the GCP one was the last source of deprecated transitive packages. With it gone, `npm install` is clean: no deprecation warnings and no advisories in any service.
 
 ## Setup
 
@@ -85,7 +85,7 @@ The three Node services name their instrumentations individually in `instrument.
 
 ## RUM events this app emits
 
-Auto-instrumented by the browser SDK (see `frontend/src/rum/otel-rum.ts`) — **once per document**, so four times per funnel:
+Auto-instrumented by the browser SDK (see `frontend/src/rum/otel.ts`) — **once per document**, so four times per funnel:
 
 | `event_name`                    | Datadog RUM type |
 |---------------------------------|------------------|
@@ -145,13 +145,34 @@ Useful for demoing error spans and slow-trace correlation on demand instead of w
 
 ## Where the workshop exercises live
 
-One file carries an explicit `WORKSHOP EXERCISE` comment block. It's fully implemented here as the reference/instructor build, but the comment marks exactly what to strip out if you want attendees to build that piece live:
+Two files carry an explicit `WORKSHOP EXERCISE` comment block. Both are fully implemented here as the reference/instructor build, and the comments mark exactly what to strip out if you want attendees to build those pieces live:
 
-| File                        | Exercise                                                                                                                | Section   |
-|-----------------------------|-------------------------------------------------------------------------------------------------------------------------|-----------|
-| `backend/src/claude.ts:145` | Manual `gen_ai.*` span around the Claude call, OTel API only — delete the body of the `tracer.startActiveSpan` callback | Section 1 |
+| File                                        | Exercise                                                                                                                                                                        | Section   |
+|---------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------|
+| `backend/src/claude-instrumentation.ts`     | Manual `gen_ai.*` span and metrics around the Claude call, OTel API only — hand attendees `withGenAISpan` as the passthrough `(request, call) => call(request)` and build it up | Section 1 |
+| `backend/src/order-instrumentation.ts`      | Manual `execute_tool` spans and `pizza.*` attributes around the agent's tool loop and the checkout funnel — same treatment, four passthrough functions                          | Section 1 |
 
-Section 2 covers browser→backend trace propagation in `frontend/src/rum/otel-rum.ts`, but that file carries **no** `WORKSHOP EXERCISE` marker — the relevant code is `propagateTraceHeaderCorsUrls` on the `FetchInstrumentation` and `XhrInstrumentation` registrations (around lines 366-373), currently set to `[/.*/]`. Narrow or remove that to demonstrate the effect; if you want it marked up like Section 1, the annotation still needs writing.
+Both exercises are structured so the *application* file is never the thing being edited. `claude.ts` calls `withGenAISpan` once; `index.ts` calls `withToolSpan` twice, `withChargeSpan` once, and two `record*` helpers — and neither file imports `@opentelemetry` at all. To show the uninstrumented "before", unwrap those calls:
+
+```ts
+const result = await withToolSpan(block, () => updateOrder(input, session, chaos));
+// becomes
+const result = await updateOrder(input, session, chaos);
+```
+
+That is the entire delta for a tool call, and it is the point worth making out loud: the handlers return the facts worth observing (`requestedToppings`, `availableToppings`, `subtotal`), and `order-instrumentation.ts` decides which of those become span attributes. Instrumentation you can see at the call site and delete in one line, not a tracer threaded through the business logic.
+
+The Inventory and Kitchen services follow the same three-layer split, so the pattern reads the same wherever you open it:
+
+| Service     | Express routes              | Application                       | Spans                             |
+|-------------|-----------------------------|-----------------------------------|-----------------------------------|
+| `backend`   | `index.ts`                  | `order.ts`, `pizza.ts`, `payment.ts`, `claude.ts` | `order-instrumentation.ts`, `claude-instrumentation.ts` |
+| `inventory` | `index.ts`                  | `stock.ts`, `menu.ts`             | `instrumentation.ts`              |
+| `kitchen`   | `index.ts`                  | `oven.ts`                         | `instrumentation.ts`              |
+
+Only the right-hand column imports `@opentelemetry`, and `otel.ts` (SDK bootstrap) sits outside the table in every service.
+
+Section 2 covers browser→backend trace propagation in `frontend/src/rum/otel.ts`, but that file carries **no** `WORKSHOP EXERCISE` marker — the relevant code is `propagateTraceHeaderCorsUrls` on the `FetchInstrumentation` and `XhrInstrumentation` registrations (around lines 366-373), currently set to `[/.*/]`. Narrow or remove that to demonstrate the effect; if you want it marked up like Section 1, the annotation still needs writing.
 
 Everything else (auto-instrumentation, the Collector pipeline, the Inventory/Kitchen services, Agent Observability ingestion) works out of the box and doesn't need to be built live — it's the scaffolding the exercises sit inside.
 
@@ -201,7 +222,7 @@ Two implementation details that are easy to get wrong, both verified against a r
 
 | Trap | What happens |
 |---|---|
-| Passing the bare relative path to the SDK | `startTracesSdk` / `startLogsSdk` gate the exporter behind `if (URL.parse(endpoint))`, and `URL.parse` returns `null` for a relative URL with no base — so the batch processor is **silently never added**. No error, the console exporter keeps printing, and nothing reaches the Collector. `otel-rum.ts` resolves the value against `window.location.origin` first, which keeps it same-origin *and* absolute. |
+| Passing the bare relative path to the SDK | `startTracesSdk` / `startLogsSdk` gate the exporter behind `if (URL.parse(endpoint))`, and `URL.parse` returns `null` for a relative URL with no base — so the batch processor is **silently never added**. No error, the console exporter keeps printing, and nothing reaches the Collector. `otel.ts` resolves the value against `window.location.origin` first, which keeps it same-origin *and* absolute. |
 | Leaving the export-ignore list as absolute URLs | `ignoreUrls` partial-matches regexes but requires **exact** matches for strings, so the old hardcoded `http://localhost:4318/v1/traces` entries stopped matching once exports moved to `/otlp/...`. Every export would then generate a Fetch/XHR span, which exports, which generates more. All three instrumentations now share one path-keyed regex, `OTLP_EXPORT_URL_PATTERN`. |
 
 ## Local dev without Docker
@@ -212,7 +233,7 @@ Note the frontend is configured as a Vite **MPA** (`appType: 'mpa'`, four entrie
 
 ## Reference: OTel GenAI semantic conventions used
 
-Span name follows the convention's `{gen_ai.operation.name} {gen_ai.request.model}` pattern — `chat us.anthropic.claude-haiku-4-5-20251001-v1:0`. Attributes set in `backend/src/claude.ts`:
+Span name follows the convention's `{gen_ai.operation.name} {gen_ai.request.model}` pattern — `chat us.anthropic.claude-haiku-4-5-20251001-v1:0`. Attributes set in `backend/src/claude-instrumentation.ts`:
 
 - Request: `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.request.max_tokens`
 - Response: `gen_ai.response.id`, `gen_ai.response.model`, `gen_ai.response.finish_reasons`
@@ -224,7 +245,9 @@ Two metrics on the `tracey.llm` meter, both histograms: `gen_ai.client.token.usa
 
 These are the exact attributes Datadog Agent Observability ingests natively — no Datadog SDK anywhere in `backend/`, `inventory/`, or `kitchen/`.
 
-`gen_ai.provider.name` is `aws.bedrock`, not `anthropic` — see the Bedrock section below. The constant appears twice in `claude.ts` (once on the span, once in the `common` object shared by both metric instruments) and the two must agree, or a metric time series and a span filter disagree on provider and the cross-signal correlation the workshop demonstrates quietly breaks.
+Each tool the agent runs gets its own span from `backend/src/order-instrumentation.ts`, named `execute_tool {name}` per the same `{operation} {target}` pattern, carrying `gen_ai.tool.name`, `gen_ai.tool.call.id` and `gen_ai.tool.type` (also `/incubating`). The call id is what lets a backend tie the tool execution back to the `chat` span that asked for it. Everything else on those spans is the private `pizza.*` namespace — no convention describes a pizza, and keeping the two groups visibly separate is half the lesson.
+
+`gen_ai.provider.name` is `aws.bedrock`, not `anthropic` — see the Bedrock section below. The constant appears twice in `claude-instrumentation.ts` (once on the span, once in the `common` object shared by both metric instruments) and the two must agree, or a metric time series and a span filter disagree on provider and the cross-signal correlation the workshop demonstrates quietly breaks.
 
 ### Reference: Claude via Amazon Bedrock
 

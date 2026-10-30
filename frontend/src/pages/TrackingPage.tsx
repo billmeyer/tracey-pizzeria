@@ -18,7 +18,7 @@ import {
 import { startOperation } from '../rum/operation';
 import { usePageEntered } from '../rum/use-page-entered';
 import { setOrderContext } from '../rum/order-context';
-import { flushRum } from '../rum/otel-rum';
+import { flushRum } from '../rum/otel';
 
 const POLL_INTERVAL_MS = 3000;
 

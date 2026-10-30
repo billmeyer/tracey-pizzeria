@@ -1,45 +1,46 @@
-import './instrument'; // must be the very first import — see instrument.ts
+import './otel'; // must be the very first import — see otel.ts
 
 import express from 'express';
-import { trace, SpanKind, SpanStatusCode } from '@opentelemetry/api';
-// Same package and same /incubating entry point as claude.ts: the convention
-// travels with the constants, not with the file that happens to use them. The
-// gen_ai.tool.* group is experimental, hence /incubating rather than the root.
-import {
-  ATTR_GEN_AI_TOOL_CALL_ID,
-  ATTR_GEN_AI_TOOL_NAME,
-  ATTR_GEN_AI_TOOL_TYPE,
-  GEN_AI_OPERATION_NAME_VALUE_EXECUTE_TOOL,
-} from '@opentelemetry/semantic-conventions/incubating';
 
 // callClaudeWithGenAI, not the plain callClaude: the chat endpoint is the one
 // the lab's traces are built around, so it takes the instrumented path. The
 // uninstrumented sibling is there to be swapped in for the Section 1 exercise.
 import { callClaudeWithGenAI, ClaudeMessage, ClaudeTool, ClaudeToolResult } from './claude';
-import { getSession, hasSession, resetSession, Address, Fulfillment } from './state';
+import {
+  getSession,
+  hasSession,
+  resetSession,
+  Address,
+  Fulfillment,
+  OrderStatus,
+} from './state';
 import { priceOrder } from './pricing';
 
-const app = express();
+// The application the agent loop drives: one function per tool Claude can
+// call, plus the order payload every checkout page re-hydrates from. Neither
+// file imports `@opentelemetry` — see order-instrumentation.ts.
+import { orderPayload, updateOrder, UpdateOrderInput } from './order';
 
-// No CORS middleware, deliberately.
-//
-// This used to be a bare `app.use(cors())`, which answers every request with
-// `Access-Control-Allow-Origin: *` — on an API that mutates orders and takes
-// card numbers. It was never needed: the browser reaches `/api/*` through the
-// frontend dev server's same-origin proxy (see vite.config.ts), so those
-// requests are not cross-origin and never consult CORS at all.
-//
-// Port 4000 is published for curl and `docker compose exec`, neither of which
-// enforces CORS, so nothing in the supported flow regressed by removing it.
-// If a future chapter does need a browser on another origin to call this API
-// directly, add `cors()` back with an explicit `origin` allowlist rather than
-// the wildcard default.
-app.use(express.json());
+import { confirmPizza, CONFIRM_PIZZA_SUMMARY, KITCHEN_URL } from './pizza';
 
-const tracer = trace.getTracer('tracey.backend');
+import {
+  applyCardDetails,
+  CardDeclinedError,
+  chargeAndPlaceOrder,
+  clearCardDetails,
+} from './payment';
 
-const INVENTORY_URL = process.env.INVENTORY_URL || 'http://inventory:4001';
-const KITCHEN_URL = process.env.KITCHEN_URL || 'http://kitchen:4002';
+// The whole of this file's observability, in one import. Every span it opens,
+// every pizza.* attribute, every gen_ai.tool.* attribute lives in
+// order-instrumentation.ts — this file has no `@opentelemetry` import, and
+// each of the four calls below is a wrapper you can delete in one line. See
+// that file's header for why it is shaped this way.
+import {
+  recordFulfillment,
+  recordOrderStatus,
+  withChargeSpan,
+  withToolSpan,
+} from './order-instrumentation';
 
 const SYSTEM_PROMPT = `
 You are Tracey, the fast-talking, mildly sarcastic AI order-taker at Tracey's Pizzeria.
@@ -71,31 +72,67 @@ const TOOLS: ClaudeTool[] = [
   {
     name: 'confirm_pizza',
     description:
-      "Lock in the pizza the customer has built and unlock the checkout screen. Does not charge the customer or send anything to the kitchen — payment happens on the checkout and payment pages.",
+        "Lock in the pizza the customer has built and unlock the checkout screen. Does not charge the customer or send anything to the kitchen — payment happens on the checkout and payment pages.",
     input_schema: { type: 'object', properties: {} },
   },
 ];
 
-async function checkStock(toppings: string[], chaos: boolean) {
-  const res = await fetch(`${INVENTORY_URL}/check-stock`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ toppings, chaos }),
-  });
-  if (!res.ok) throw new Error(`inventory returned ${res.status}`);
-  return (await res.json()) as { topping: string; available: boolean }[];
-}
+const app = express();
 
-async function bakePizza(order: unknown, chaos: boolean, fulfillment: Fulfillment) {
-  const res = await fetch(`${KITCHEN_URL}/bake`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ order, chaos, fulfillment }),
-  });
-  if (!res.ok) throw new Error(`kitchen returned ${res.status}`);
-  return (await res.json()) as { orderNumber: string; etaMinutes: number };
-}
+// No CORS middleware, deliberately.
+//
+// This used to be a bare `app.use(cors())`, which answers every request with
+// `Access-Control-Allow-Origin: *` — on an API that mutates orders and takes
+// card numbers. It was never needed: the browser reaches `/api/*` through the
+// frontend dev server's same-origin proxy (see vite.config.ts), so those
+// requests are not cross-origin and never consult CORS at all.
+//
+// Port 4000 is published for curl and `docker compose exec`, neither of which
+// enforces CORS, so nothing in the supported flow regressed by removing it.
+// If a future chapter does need a browser on another origin to call this API
+// directly, add `cors()` back with an explicit `origin` allowlist rather than
+// the wildcard default.
+app.use(express.json());
 
+/**
+ * ── Checkout funnel API ───────────────────────────────────────────────────
+ * Each hard page transition lands on a fresh document that knows only its
+ * sessionId, so every page re-hydrates through GET /api/order/:sessionId.
+ * That GET is deliberate: it gives each new page view a real fetch span the
+ * browser SDK can correlate to a backend APM trace, instead of a page view
+ * with no network activity behind it.
+ * ──────────────────────────────────────────────────────────────────────────
+ */
+
+/** Re-hydrate a page: the order and its pricing, for any funnel step to render. */
+app.get('/api/order/:sessionId', (req, res) => {
+  const { sessionId } = req.params;
+
+  // A session that was never seen gets an empty order rather than a 404 —
+  // the frontend treats "no confirmed pizza" as "go back to the order page".
+  if (!hasSession(sessionId)) {
+    return res.json({ ...orderPayload(sessionId), known: false });
+  }
+  res.json({ ...orderPayload(sessionId), known: true });
+});
+
+/**
+ * Start over. Wipes the order and the chat transcript but keeps the session id,
+ * so "Order another" opens a clean funnel inside the same RUM session.
+ */
+app.post('/api/order/:sessionId/reset', (req, res) => {
+  resetSession(req.params.sessionId);
+  res.json(orderPayload(req.params.sessionId));
+});
+
+/**
+ * Funnel step 1 — one turn of the conversation with Tracey.
+ *
+ * Takes the customer's message, runs the agent loop until Claude stops asking
+ * for tools, and answers with the reply plus the order as it now stands — so
+ * the chat bubble and the order summary beside it update from one round trip.
+ * The order lives server-side, keyed by sessionId; the browser sends no state.
+ */
 app.post('/api/chat', async (req, res) => {
   const { sessionId, message, chaos } = req.body as {
     sessionId: string;
@@ -144,109 +181,37 @@ app.post('/api/chat', async (req, res) => {
         if (block.type !== 'tool_use') continue;
 
         if (block.name === 'update_order') {
-          await tracer.startActiveSpan(
-            // Conventional tool span. Same tracer, same body, same INTERNAL
-            // kind as the old 'tool.update_order' name — the only change is a
-            // naming discipline, and it is what lets an LLM-aware backend
-            // reconstruct the agent loop instead of seeing an opaque span.
-            // 'function' stays a literal: gen_ai.tool.type has no value
-            // constants in semconv 1.43.0.
-            `${GEN_AI_OPERATION_NAME_VALUE_EXECUTE_TOOL} ${block.name}`,
-            {
-              kind: SpanKind.INTERNAL,
-              attributes: {
-                [ATTR_GEN_AI_TOOL_NAME]: block.name,
-                [ATTR_GEN_AI_TOOL_CALL_ID]: block.id,
-                [ATTR_GEN_AI_TOOL_TYPE]: 'function',
-              },
-            },
-            async (span) => {
-              try {
-                const input = block.input as {
-                  size?: string;
-                  crust?: string;
-                  toppings?: string[];
-                };
-                if (input.size) session.order.size = input.size as any;
-                if (input.crust) session.order.crust = input.crust as any;
-
-                let summary = 'Order updated.';
-                if (input.toppings?.length) {
-                  span.setAttribute('pizza.requested_toppings', input.toppings);
-                  const stockResults = await checkStock(input.toppings, !!chaos);
-                  const available = stockResults.filter((s) => s.available).map((s) => s.topping);
-                  const unavailable = stockResults.filter((s) => !s.available).map((s) => s.topping);
-
-                  session.order.toppings.push(...available);
-                  session.order.unavailableToppings.push(...unavailable);
-
-                  span.setAttribute('pizza.available_toppings', available);
-                  span.setAttribute('pizza.unavailable_toppings', unavailable);
-
-                  summary = `Added: ${available.join(', ') || 'none'}.${
-                    unavailable.length ? ` Unavailable: ${unavailable.join(', ')}.` : ''
-                  }`;
-                }
-
-                toolResults.push({
-                  type: 'tool_result',
-                  tool_use_id: block.id,
-                  content: summary,
-                });
-              } catch (err) {
-                span.recordException(err as Error);
-                span.setStatus({ code: SpanStatusCode.ERROR });
-                toolResults.push({
-                  type: 'tool_result',
-                  tool_use_id: block.id,
-                  content: 'Inventory check failed — tell the customer to try again.',
-                  is_error: true,
-                });
-              } finally {
-                span.end();
-              }
-            }
-          );
+          try {
+            // The one instrumentation call: `updateOrder(...)` is the whole
+            // uninstrumented version of this line.
+            const result = await withToolSpan(block, () =>
+              updateOrder(block.input as UpdateOrderInput, session, !!chaos)
+            );
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: block.id,
+              content: result.summary,
+            });
+          } catch {
+            // Already recorded on the span by withToolSpan, which rethrows so
+            // this decision — hand the failure back to Claude rather than fail
+            // the turn — stays with the application.
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: block.id,
+              content: 'Inventory check failed — tell the customer to try again.',
+              is_error: true,
+            });
+          }
         }
 
-        // Confirming the pizza no longer touches the kitchen — it only flips
-        // the gate that lets the frontend hard-navigate to /checkout/. The
-        // kitchen call moved to POST /api/order/:sessionId/payment, so the
-        // bake happens when the customer actually pays.
         if (block.name === 'confirm_pizza') {
-          await tracer.startActiveSpan(
-            // Identical shape to update_order above — the conventional
-            // attributes all read off `block`, so one form covers every tool.
-            `${GEN_AI_OPERATION_NAME_VALUE_EXECUTE_TOOL} ${block.name}`,
-            {
-              kind: SpanKind.INTERNAL,
-              attributes: {
-                [ATTR_GEN_AI_TOOL_NAME]: block.name,
-                [ATTR_GEN_AI_TOOL_CALL_ID]: block.id,
-                [ATTR_GEN_AI_TOOL_TYPE]: 'function',
-              },
-            },
-            async (span) => {
-              session.order.confirmed = true;
-              const pricing = priceOrder(session.order);
-              span.setAttribute('pizza.size', session.order.size ?? 'medium');
-              span.setAttribute('pizza.crust', session.order.crust ?? 'regular');
-              span.setAttribute('pizza.topping_count', session.order.toppings.length);
-              span.setAttribute('pizza.subtotal', pricing.subtotal);
-
-              // The subtotal stays on the span for APM/RUM faceting but is
-              // deliberately kept out of the tool result: pricing is not
-              // shown anywhere on the order view, and handing Claude a
-              // number is the surest way to have it quoted in the chat.
-              toolResults.push({
-                type: 'tool_result',
-                tool_use_id: block.id,
-                content:
-                  'Pizza locked in. The checkout screen is now unlocked. Reply with one short line telling the customer to tap Checkout to choose pickup or delivery. Do not mention any prices or totals.',
-              });
-              span.end();
-            }
-          );
+          await withToolSpan(block, () => confirmPizza(session));
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: CONFIRM_PIZZA_SUMMARY,
+          });
         }
       }
 
@@ -269,36 +234,11 @@ app.post('/api/chat', async (req, res) => {
 });
 
 /**
- * ── Checkout funnel API ───────────────────────────────────────────────────
- * Each hard page transition lands on a fresh document that knows only its
- * sessionId, so every page re-hydrates through GET /api/order/:sessionId.
- * That GET is deliberate: it gives each new page view a real fetch span the
- * browser SDK can correlate to a backend APM trace, instead of a page view
- * with no network activity behind it.
- * ──────────────────────────────────────────────────────────────────────────
+ * Funnel step 2 — pickup or delivery, plus the address if it's delivery.
+ *
+ * The address is validated here rather than only in the browser: this API is
+ * reachable with curl, and a delivery order with no street is not an order.
  */
-
-function orderPayload(sessionId: string) {
-  const session = getSession(sessionId);
-  return { order: session.order, pricing: priceOrder(session.order) };
-}
-
-app.get('/api/order/:sessionId', (req, res) => {
-  const { sessionId } = req.params;
-
-  // A session that was never seen gets an empty order rather than a 404 —
-  // the frontend treats "no confirmed pizza" as "go back to the order page".
-  if (!hasSession(sessionId)) {
-    return res.json({ ...orderPayload(sessionId), known: false });
-  }
-  res.json({ ...orderPayload(sessionId), known: true });
-});
-
-app.post('/api/order/:sessionId/reset', (req, res) => {
-  resetSession(req.params.sessionId);
-  res.json(orderPayload(req.params.sessionId));
-});
-
 app.post('/api/order/:sessionId/fulfillment', (req, res) => {
   const { sessionId } = req.params;
   const { fulfillment, address } = req.body as {
@@ -322,12 +262,17 @@ app.post('/api/order/:sessionId/fulfillment', (req, res) => {
   session.order.fulfillment = fulfillment;
   session.order.address = fulfillment === 'delivery' ? (address as Address) : null;
 
-  const span = trace.getActiveSpan();
-  span?.setAttribute('pizza.fulfillment', fulfillment);
+  recordFulfillment(fulfillment);
 
   res.json(orderPayload(sessionId));
 });
 
+/**
+ * Funnel step 3 — take the card and place the order. The only endpoint that
+ * reaches the kitchen, and the only one that can fail in two different ways:
+ * 402 when the card is declined (retry with another), 502 when the kitchen is
+ * unreachable (nothing was charged). Both are deliberate demo material.
+ */
 app.post('/api/order/:sessionId/payment', async (req, res) => {
   const { sessionId } = req.params;
   const { cardNumber, tipPercent, chaos } = req.body as {
@@ -341,62 +286,24 @@ app.post('/api/order/:sessionId/payment', async (req, res) => {
     return res.status(409).json({ error: 'Choose pickup or delivery before paying.' });
   }
 
-  const digits = (cardNumber ?? '').replace(/\D/g, '');
-  if (digits.length !== 16) {
+  if (!applyCardDetails(session, cardNumber, tipPercent)) {
     return res.status(400).json({ error: 'Card number must be 16 digits.' });
   }
-
-  session.order.tipPercent = typeof tipPercent === 'number' ? tipPercent : 0;
-  session.order.payment = {
-    method: 'card',
-    last4: digits.slice(-4),
-    tipPercent: session.order.tipPercent,
-  };
 
   const pricing = priceOrder(session.order);
 
   try {
-    const receipt = await tracer.startActiveSpan(
-      'charge_and_place_order',
-      { kind: SpanKind.INTERNAL },
-      async (span) => {
-        span.setAttribute('pizza.order_total', pricing.total);
-        span.setAttribute('pizza.tip_percent', session.order.tipPercent ?? 0);
-        span.setAttribute('pizza.fulfillment', session.order.fulfillment!);
-
-        // Chaos mode declines roughly one card in three, so the payment page
-        // has a reliable way to produce a RUM error on demand.
-        if (chaos && Math.random() < 0.34) {
-          const err = new Error('Card declined by issuer');
-          span.recordException(err);
-          span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
-          span.end();
-          throw err;
-        }
-
-        try {
-          const baked = await bakePizza(
-            session.order,
-            !!chaos,
-            session.order.fulfillment!
-          );
-          span.setAttribute('pizza.order_number', baked.orderNumber);
-          span.end();
-          return baked;
-        } catch (err) {
-          span.recordException(err as Error);
-          span.setStatus({ code: SpanStatusCode.ERROR });
-          span.end();
-          throw err;
-        }
-      }
+    // Same one-line shape as the tool calls: `chargeAndPlaceOrder(session,
+    // !!chaos)` is the uninstrumented version.
+    const receipt = await withChargeSpan(session.order, pricing, () =>
+      chargeAndPlaceOrder(session, !!chaos)
     );
 
     session.order.receipt = receipt;
     res.json({ ...orderPayload(sessionId), receipt });
   } catch (err) {
-    const declined = (err as Error).message.includes('declined');
-    session.order.payment = null;
+    const declined = err instanceof CardDeclinedError;
+    clearCardDetails(session);
     res.status(declined ? 402 : 502).json({
       error: declined
         ? 'Card declined — try a different card.'
@@ -406,6 +313,14 @@ app.post('/api/order/:sessionId/payment', async (req, res) => {
   }
 });
 
+/**
+ * Funnel step 4 — how the bake is going, proxied from the kitchen.
+ *
+ * The tracking page polls this every few seconds, which is what gives the RUM
+ * session a steady run of fetches each correlated to a trace that crosses two
+ * services. Session-scoped rather than taking an order number, so a customer
+ * can only ever poll their own order.
+ */
 app.get('/api/order/:sessionId/status', async (req, res) => {
   const { sessionId } = req.params;
   const session = getSession(sessionId);
@@ -418,11 +333,9 @@ app.get('/api/order/:sessionId/status', async (req, res) => {
   try {
     const upstream = await fetch(`${KITCHEN_URL}/status/${orderNumber}`);
     if (!upstream.ok) throw new Error(`kitchen returned ${upstream.status}`);
-    const status = await upstream.json();
+    const status = (await upstream.json()) as OrderStatus;
 
-    const span = trace.getActiveSpan();
-    span?.setAttribute('pizza.order_number', orderNumber);
-    span?.setAttribute('pizza.stage', (status as { stage: string }).stage);
+    recordOrderStatus(orderNumber, status.stage);
 
     res.json(status);
   } catch (err) {
@@ -431,6 +344,10 @@ app.get('/api/order/:sessionId/status', async (req, res) => {
   }
 });
 
+// Liveness probe for Compose's healthcheck (see compose.yaml), which gates
+// startup order. Its spans are dropped at the Collector rather than here —
+// polled every few seconds by three services, they would otherwise be most of
+// the trace volume. See collector-config.yaml's filter/healthz.
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
 const PORT = process.env.PORT || 4000;
