@@ -173,6 +173,7 @@ run-backend:
 	AWS_REGION=$${AWS_REGION} \
 	AWS_BEARER_TOKEN_BEDROCK=$${AWS_BEARER_TOKEN_BEDROCK} \
 	BEDROCK_MODEL_ID=$${BEDROCK_MODEL_ID} \
+	MOCK_LLM=$${MOCK_LLM} \
 	INVENTORY_URL=http://localhost:4001 \
 	KITCHEN_URL=http://localhost:4002 \
 	npm run dev

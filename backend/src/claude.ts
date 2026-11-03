@@ -9,6 +9,10 @@ import type Anthropic from '@anthropic-ai/sdk';
 // the only file here that imports @opentelemetry.
 import { withGenAISpan } from './claude-instrumentation';
 
+// The offline stand-in, used only when MOCK_LLM=true. Application code, not
+// instrumentation — see claude-mock.ts for why that distinction is the point.
+import { createMockMessage } from './claude-mock';
+
 // Claude is reached through Amazon Bedrock rather than Anthropic's own API, so
 // there is no ANTHROPIC_API_KEY anywhere in this stack. `AnthropicBedrock` is
 // the bedrock-runtime (InvokeModel) client, which is the one that accepts the
@@ -48,6 +52,26 @@ const anthropic = new AnthropicBedrock({
  */
 export const MODEL =
   process.env.BEDROCK_MODEL_ID || 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
+
+/**
+ * Answer from `claude-mock.ts` instead of Bedrock.
+ *
+ * The escape hatch for the one failure this app cannot recover from on its own:
+ * AWS_BEARER_TOKEN_BEDROCK is presigned and time-limited, so a token that dies
+ * mid-session turns every chat turn into a 403 and there is nothing in the UI
+ * that can fix it. Setting MOCK_LLM=true keeps the funnel orderable — and,
+ * because the mock is swapped in *under* `withGenAISpan`, keeps every
+ * gen_ai.* span and both histograms working exactly as they did.
+ *
+ * Read once at module load and announced on startup, because a mock that
+ * engaged silently would be indistinguishable from a model giving strange
+ * answers — which is a far worse debugging session than a missing token.
+ */
+const MOCK_LLM = process.env.MOCK_LLM === 'true';
+
+if (MOCK_LLM) {
+  console.warn('[claude] MOCK_LLM=true — answering from claude-mock.ts, Bedrock is not called');
+}
 
 export type ClaudeMessage = Anthropic.MessageParam;
 export type ClaudeTool = Anthropic.Tool;
@@ -108,5 +132,10 @@ export async function callClaude(
     tools,
   };
 
-  return withGenAISpan(request, (req) => anthropic.messages.create(req));
+  // The swap happens *inside* the wrapper, not around it: instrumentation reads
+  // the response object, never the wire, so it cannot tell the two apart and
+  // needs no branch of its own.
+  return withGenAISpan(request, (req) =>
+    MOCK_LLM ? createMockMessage(req) : anthropic.messages.create(req)
+  );
 }

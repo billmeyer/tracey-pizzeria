@@ -121,6 +121,9 @@ services:
       AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:?set AWS_BEARER_TOKEN_BEDROCK in .env}
       # Unset is fine — claude.ts falls back to the lab's model id.
       BEDROCK_MODEL_ID: ${BEDROCK_MODEL_ID:-}
+      # The offline fallback. Set MOCK_LLM=true in .env to answer chat from
+      # claude-mock.ts when the Bedrock token has expired — see .env.example.
+      MOCK_LLM: ${MOCK_LLM:-}
       INVENTORY_URL: http://inventory:4001
       KITCHEN_URL: http://kitchen:4002
     volumes:
