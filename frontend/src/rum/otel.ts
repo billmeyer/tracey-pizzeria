@@ -432,13 +432,28 @@ export async function initOtelRum(options: InitOtelRumOptions): Promise<void> {
             // There is deliberately no XHR instrumentation alongside it: the
             // app uses fetch exclusively, and registering an unused transport's
             // instrumentation buys nothing but patched globals.
+            // Scoped to this app's own API, and deliberately not `[/.*/]`.
+            //
+            // The option is an *allowlist of origins to attach `traceparent`
+            // to*, and the permissive version attaches it to every cross-origin
+            // request the page makes — analytics beacons, font CDNs, embedded
+            // third-party widgets. None of those named `traceparent` in their
+            // `Access-Control-Allow-Headers`, so the browser fails the preflight
+            // and the request never goes out at all: a header added for
+            // observability breaks the feature it was watching. It also leaks
+            // internal trace ids to anyone the page happens to talk to.
+            //
+            // `/\/api\//` matches exactly the calls that reach a service we
+            // control and that can therefore continue the trace. Same-origin
+            // requests are unaffected either way — this option only governs
+            // cross-origin ones.
             new FetchInstrumentation({
-                propagateTraceHeaderCorsUrls: [/.*/],
+                propagateTraceHeaderCorsUrls: [/\/api\//],
                 ignoreUrls: [OTLP_EXPORT_URL_PATTERN],
             }),
 
             new XhrInstrumentation({
-                propagateTraceHeaderCorsUrls: [/.*/],
+                propagateTraceHeaderCorsUrls: [/\/api\//],
                 ignoreUrls: [OTLP_EXPORT_URL_PATTERN],
             }),
         ],
