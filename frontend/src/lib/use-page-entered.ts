@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react';
-import { emitPageEnteredAction, type PageAttributes, type Step } from './events';
+import type { Step } from './steps';
+import { emitPageEnteredAction, type PageAttributes } from './telemetry';
 
 /**
- * Emit one `traceys.pizzeria.page.entered` INFO record when a funnel page mounts.
+ * Report that a funnel page has mounted, exactly once.
  *
  * The ref guard is load-bearing, not defensive: `bootstrapPage` renders every
  * page inside `<React.StrictMode>`, which in development mounts, unmounts and

@@ -3,11 +3,15 @@ import KioskShell from '../components/KioskShell';
 import OrderSummary from '../components/OrderSummary';
 import { useOrder } from '../lib/useOrder';
 import { money, submitPayment } from '../lib/order';
-import { emitAppError, emitValidationError, namedAction } from '../rum/events';
-import { hardNavigate, hardNavigateBack } from '../rum/navigate';
-import { startOperation } from '../rum/operation';
-import { setOrderContext } from '../rum/order-context';
-import { usePageEntered } from '../rum/use-page-entered';
+import {
+  emitAppError,
+  emitValidationError,
+  namedAction,
+  setOrderContext,
+  startOperation,
+} from '../lib/telemetry';
+import { hardNavigate, hardNavigateBack } from '../lib/navigate';
+import { usePageEntered } from '../lib/use-page-entered';
 
 const TIP_OPTIONS = [0, 10, 18, 25];
 

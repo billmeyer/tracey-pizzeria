@@ -5,9 +5,9 @@ import {
   readCachedOrder,
   type OrderSnapshot,
 } from './order';
-import { emitAppError, type Step } from '../rum/events';
-import { hardNavigateBack } from '../rum/navigate';
-import { startOperation } from '../rum/operation';
+import type { Step } from './steps';
+import { emitAppError, startOperation } from './telemetry';
+import { hardNavigateBack } from './navigate';
 
 interface UseOrderResult {
   snapshot: OrderSnapshot | null;

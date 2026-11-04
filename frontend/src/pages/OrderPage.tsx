@@ -10,10 +10,14 @@ import {
   type OrderIssue,
   type OrderSnapshot,
 } from '../lib/order';
-import { emitAppError, emitValidationError, namedAction } from '../rum/events';
-import { hardNavigate } from '../rum/navigate';
-import { startOperation } from '../rum/operation';
-import { usePageEntered } from '../rum/use-page-entered';
+import {
+  emitAppError,
+  emitValidationError,
+  namedAction,
+  startOperation,
+} from '../lib/telemetry';
+import { hardNavigate } from '../lib/navigate';
+import { usePageEntered } from '../lib/use-page-entered';
 
 interface ChatBubble {
   role: 'user' | 'tracey';

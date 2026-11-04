@@ -6,6 +6,7 @@ import {
   ATTR_EXCEPTION_TYPE,
   EVENT_EXCEPTION,
 } from '@opentelemetry/semantic-conventions';
+import { STEPS, stepIndex, type Step } from '../lib/steps';
 
 /**
  * ── Custom RUM events ─────────────────────────────────────────────────────
@@ -21,20 +22,6 @@ import {
  *    `traceys.pizzeria.funnel.*` attributes that `order-context.ts` stamps on everything.
  * ──────────────────────────────────────────────────────────────────────────
  */
-
-/** The four documents of the funnel, in order. Each is a hard page load. */
-export const STEPS = ['order', 'checkout', 'payment', 'tracking'] as const;
-export type Step = (typeof STEPS)[number];
-
-/** Where each step lives. Trailing slashes make the dev server serve the
- *  document directly rather than redirecting, so each hard transition is one
- *  navigation in RUM instead of a redirect hop followed by a page load. */
-export const STEP_PATHS: Record<Step, string> = {
-  order: '/',
-  checkout: '/checkout/',
-  payment: '/payment/',
-  tracking: '/tracking/',
-};
 
 const FUNNEL_STARTED_KEY = 'tracey-funnel-started-at';
 const STEP_ENTERED_KEY = 'tracey-step-entered-at';
@@ -52,10 +39,6 @@ function readTimestamp(key: string): number | null {
   if (!raw) return null;
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-export function stepIndex(step: Step): number {
-  return STEPS.indexOf(step);
 }
 
 /**

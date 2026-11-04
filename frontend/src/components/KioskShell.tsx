@@ -1,14 +1,7 @@
 import type { ReactNode } from 'react';
-import { STEPS, type Step } from '../rum/events';
+import { STEP_LABELS, STEPS, type Step } from '../lib/steps';
 import { isChaos } from '../lib/order';
 import SessionFooter from './SessionFooter';
-
-const STEP_LABELS: Record<Step, string> = {
-  order: 'Order',
-  checkout: 'Checkout',
-  payment: 'Payment',
-  tracking: 'Tracking',
-};
 
 interface KioskShellProps {
   step: Step;

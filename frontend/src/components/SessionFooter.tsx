@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { namedAction } from '../rum/events';
-import { useRumSessionId } from '../rum/use-rum-session';
+import { namedAction } from '../lib/telemetry';
+import { useSessionId } from '../lib/use-session-id';
 
 type CopyState = 'idle' | 'copied' | 'failed';
 
@@ -55,7 +55,7 @@ function datadogSessionUrl(sessionId: string): string {
  * not searchable, so prettier here would mean useless.
  */
 export default function SessionFooter() {
-  const sessionId = useRumSessionId();
+  const sessionId = useSessionId();
   const [copyState, setCopyState] = useState<CopyState>('idle');
 
   // Clear the "Copied" acknowledgement, and cancel the timer on unmount so a

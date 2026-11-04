@@ -1,5 +1,5 @@
-import { emitStepCompletedAction, STEP_PATHS, type Step } from './events';
-import { flushRum } from './otel';
+import { STEP_PATHS, type Step } from './steps';
+import { emitStepCompletedAction, flushTelemetry } from './telemetry';
 
 /**
  * ── Hard page transition ──────────────────────────────────────────────────
@@ -14,12 +14,15 @@ import { flushRum } from './otel';
  * stay pinned to the first document forever.
  *
  * Order matters here: emit the completion event, *await the flush*, then
- * navigate. Skipping the flush drops the event (see `flushRum`).
+ * navigate. Skipping the flush drops the event (see `flushRum`). With no
+ * telemetry installed both calls are inert and the navigation is unchanged,
+ * which is why this lives in `lib/` rather than in `rum/` — the funnel's
+ * shape is application behaviour that telemetry observes, not the reverse.
  * ──────────────────────────────────────────────────────────────────────────
  */
 export async function hardNavigate(from: Step, to: Step): Promise<void> {
   emitStepCompletedAction(from, to);
-  await flushRum();
+  await flushTelemetry();
   window.location.assign(STEP_PATHS[to]);
 }
 
@@ -30,6 +33,6 @@ export async function hardNavigate(from: Step, to: Step): Promise<void> {
  */
 export async function hardNavigateBack(from: Step, to: Step): Promise<void> {
   emitStepCompletedAction(from, to);
-  await flushRum();
+  await flushTelemetry();
   window.location.replace(STEP_PATHS[to]);
 }

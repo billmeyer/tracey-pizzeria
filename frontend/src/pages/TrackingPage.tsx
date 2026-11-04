@@ -13,12 +13,12 @@ import {
   emitAppError,
   emitFunnelCompletedAction,
   emitStageChangedAction,
+  flushTelemetry,
   namedAction,
-} from '../rum/events';
-import { startOperation } from '../rum/operation';
-import { usePageEntered } from '../rum/use-page-entered';
-import { setOrderContext } from '../rum/order-context';
-import { flushRum } from '../rum/otel';
+  setOrderContext,
+  startOperation,
+} from '../lib/telemetry';
+import { usePageEntered } from '../lib/use-page-entered';
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -87,7 +87,7 @@ export default function TrackingPage() {
           // whenever this tab eventually goes away. The span has to be closed
           // first or it never reaches the collector.
           op.end();
-          void flushRum();
+          void flushTelemetry();
           return;
         }
 
@@ -175,7 +175,7 @@ export default function TrackingPage() {
               className="primary"
               onClick={() => {
                 void resetOrder()
-                  .then(() => flushRum())
+                  .then(() => flushTelemetry())
                   .then(() => window.location.assign('/'));
               }}
               {...namedAction('tracking.start_new_order')}

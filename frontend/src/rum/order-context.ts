@@ -1,6 +1,7 @@
 import type { Attributes } from '@opentelemetry/api';
 import type { SpanProcessor, Span, ReadableSpan } from '@opentelemetry/sdk-trace';
 import type { LogRecordProcessor, ReadWriteLogRecord } from '@opentelemetry/sdk-logs';
+import type { OrderContextValues } from '../lib/telemetry';
 
 /**
  * ── Order context ─────────────────────────────────────────────────────────
@@ -20,23 +21,6 @@ import type { LogRecordProcessor, ReadWriteLogRecord } from '@opentelemetry/sdk-
  * `traceys.pizzeria.total`, topping count, and so on.
  * ──────────────────────────────────────────────────────────────────────────
  */
-
-export interface OrderContextValues {
-  /** Which funnel step this document represents: order | checkout | payment | tracking */
-  step?: string;
-  stepIndex?: number;
-  size?: string;
-  crust?: string;
-  toppingCount?: number;
-  toppings?: string;
-  fulfillment?: string;
-  tipPercent?: number;
-  subtotal?: number;
-  total?: number;
-  orderNumber?: string;
-  stage?: string;
-  chaos?: boolean;
-}
 
 let current: OrderContextValues = {};
 

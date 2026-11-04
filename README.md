@@ -22,7 +22,7 @@ Two details make this work, and both are easy to get wrong:
 
 | Concern                                        | Where                              | Why                                                                                                                                                                                                              |
 |------------------------------------------------|------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Events emitted just before navigating are lost | `rum/otel.ts` → `flushRum()`   | Both SDKs export on a timer and neither installs a `pagehide` flush, so `traceys.pizzeria.funnel.step_completed` would be discarded with the document. `hardNavigate` awaits a flush *before* `location.assign`. |
+| Events emitted just before navigating are lost | `rum/otel.ts` → `flushRum()`   | Both SDKs export on a timer and neither installs a `pagehide` flush, so `traceys.pizzeria.funnel.step_completed` would be discarded with the document. `hardNavigate` (`lib/navigate.ts`) awaits a flush *before* `location.assign`. |
 | Clicks land on a button's child span           | `App.css` → `pointer-events: none` | `UserActionInstrumentation` reads `data-otel-*` off the **event target**, so a click on an icon arrives with no action name.                                                                                     |
 
 ## Architecture
@@ -114,7 +114,7 @@ All attributes below are `traceys.pizzeria.*`-prefixed in full (`traceys.pizzeri
 
 `funnel.step_entered` and `page.entered` are deliberately separate: the first fires before React has rendered anything, the second when the component is actually on screen, so the gap between their timestamps is the document's React startup cost.
 
-The `exception` events come from two helpers in `events.ts`. `emitValidationError` covers address and card validation; `emitAppError` covers everything else — a declined card, an unreachable kitchen, any failed fetch — and is called from all four pages. Both deliberately use the `exception` event name and the standard `exception.*` attributes, so they land as real **RUM Errors** rather than info logs nobody will find.
+The `exception` events come from two helpers in `events.ts`. `emitValidationError` covers address and card validation; `emitAppError` covers everything else — a declined card, an unreachable kitchen, any failed fetch — and is called from all four pages (through the seam described below). Both deliberately use the `exception` event name and the standard `exception.*` attributes, so they land as real **RUM Errors** rather than info logs nobody will find.
 
 ### Attributes on *every* event
 
@@ -123,6 +123,29 @@ The `exception` events come from two helpers in `events.ts`. `emitValidationErro
 They are processors rather than resource attributes on purpose: the resource is frozen when the SDK starts, but the order keeps changing *within* a page view (pick delivery, then type a tip). A processor reads the live value at emit time, so a web vital recorded before the tip and a click recorded after it both carry the correct total. The practical payoff is that `browser.navigation_timing` and `browser.web_vital` are faceted by order contents — "is LCP worse on delivery orders" is a group-by, not a guess.
 
 Named actions use `data-otel-*` DOM attributes (via the `namedAction()` helper), which `UserActionInstrumentation` collects and `promoteNamedAction` lifts to `traceys.pizzeria.action.name` — so clicks group as `payment.place_order` rather than `div#root>div>button:nth-of-type(2)`.
+
+### Instrumentation vs. application code
+
+The browser follows the same split as the three Node services: application code says *what* is worth reporting, and one layer decides how to say it. The dividing line is a directory boundary, enforced by imports.
+
+```
+frontend/src/
+  lib/steps.ts        the funnel as data — STEPS, STEP_PATHS, STEP_LABELS, Step
+  lib/telemetry.ts    the seam: what the app reports, declared with no SDK
+  lib/navigate.ts     hard transitions (emit → flush → location.assign)
+  pages/, components/ call lib/telemetry; never import @opentelemetry
+  rum/install.ts      the only file bootstrap.tsx imports from rum/
+  rum/*               the SDK, the processors, the emit* helpers
+```
+
+`lib/telemetry.ts` declares the whole telemetry surface (`startOperation`, `emitAppError`, `namedAction`, `setOrderContext`, `flushTelemetry`, …) and implements every one of them as a **no-op**. `rum/install.ts` supplies the real implementation, and `bootstrapPage` installs it before anything else runs. Nothing in `lib/`, `pages/` or `components/` imports `@opentelemetry` or reaches into `rum/`.
+
+Two consequences are worth knowing:
+
+- `op.ctx` is typed as an opaque `TraceContext` (`unknown`) rather than an OTel `Context`. Pages receive one from `startOperation` and hand it straight back to `emitAppError`, so they never need the API types; `rum/install.ts` is the one place that casts.
+- `lib/steps.ts` is import-free on purpose. The step rail renders from it, `hardNavigate` resolves URLs from it, and the RUM layer reads `funnel.step` / `step_index` off it — telemetry is a *consumer* of the funnel's shape, not its owner.
+
+The payoff is that the uninstrumented "before" state is a deletion: remove `src/rum/` and the two `rum/install` lines in `bootstrap.tsx`, and the app still builds, still walks all four steps, and simply emits nothing. The footer shows "starting…" where the session id would be, and `namedAction()` returns no attributes — lighting all ~12 named actions back up is a change to one function body, not twelve call sites.
 
 ### Getting trace ids onto browser log records
 
@@ -170,7 +193,7 @@ The Inventory and Kitchen services follow the same three-layer split, so the pat
 | `inventory` | `index.ts`                  | `stock.ts`, `menu.ts`             | `instrumentation.ts`              |
 | `kitchen`   | `index.ts`                  | `oven.ts`                         | `instrumentation.ts`              |
 
-Only the right-hand column imports `@opentelemetry`, and `otel.ts` (SDK bootstrap) sits outside the table in every service.
+Only the right-hand column imports `@opentelemetry`, and `otel.ts` (SDK bootstrap) sits outside the table in every service. The frontend splits the same way, with the whole of `src/rum/` as its right-hand column — see [Instrumentation vs. application code](#instrumentation-vs-application-code). Its "before" state is the one you get by deleting that directory outright.
 
 Section 2 covers browser→backend trace propagation in `frontend/src/rum/otel.ts`, but that file carries **no** `WORKSHOP EXERCISE` marker — the relevant code is `propagateTraceHeaderCorsUrls` on the `FetchInstrumentation` and `XhrInstrumentation` registrations (around lines 366-373), currently set to `[/.*/]`. Narrow or remove that to demonstrate the effect; if you want it marked up like Section 1, the annotation still needs writing.
 

@@ -1,4 +1,4 @@
-import { setOrderContext } from '../rum/order-context';
+import { setOrderContext } from './telemetry';
 
 export type Fulfillment = 'pickup' | 'delivery';
 

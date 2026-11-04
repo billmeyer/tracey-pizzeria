@@ -71,7 +71,7 @@ import {
     startPageTrace,
 } from './page-trace';
 import { notifySessionReady, registerSessionManager } from './session';
-import type {Step} from './events';
+import type {Step} from '../lib/steps';
 
 // Per the Datadog RUM x OTel integration guide's Session Management section:
 // expire after 4h of continuous activity or 15 min of inactivity.
@@ -399,8 +399,8 @@ export async function initOtelRum(options: InitOtelRumOptions): Promise<void> {
             }),
             new ErrorsInstrumentation(),                // Uncaught errors -> event_name "exception" -> Datadog RUM Error
             new ConsoleInstrumentation(),               // console.* calls -> log records
-            new NavigationTimingInstrumentation(),      // Page navigation -> event_name "browser.navigation_timing" -> Datadog RUM Resource
             new NavigationInstrumentation(),            // Page view marker -> event_name "browser.navigation"
+            new NavigationTimingInstrumentation(),      // Page navigation -> event_name "browser.navigation_timing" -> Datadog RUM Resource
             new WebVitalsInstrumentation(),             // Core Web Vitals -> event_name "browser.web_vital"
 
             new ResourceTimingInstrumentation({
