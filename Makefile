@@ -22,8 +22,8 @@ SHELL := /bin/bash
 export
 
 .PHONY: help install install-backend install-frontend install-inventory install-kitchen \
-	check-collector-config run-stack \
-	run-collector run-backend run-frontend run-inventory run-kitchen \
+	run-stack run-backend run-frontend run-inventory run-kitchen \
+	check-collector-config run-collector \
 	clean clean-deps
 
 help:
