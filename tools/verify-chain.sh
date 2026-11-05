@@ -57,6 +57,30 @@ else
 fi
 git checkout -q -- .
 
+# ── Invariant 1b: the strip lands on the lines it meant to ─────────────────
+# Reversibility is NOT enough. Commenting out the wrong lines round-trips
+# perfectly, so invariant 1 passes even when blocks have drifted onto whatever
+# happened to move under them. Not hypothetical: a six-line comment added to
+# collector-config.yaml shifted every block below it, the strip commented out
+# `traces:`, `exporters:` and `send_batch_size`, and invariant 1 reported that
+# everything was fine.
+#
+# strip.py now asserts an anchor on each block's first line, so drift aborts it
+# there. This re-checks the structural result, because the catch belongs in
+# both places and this one needs no Docker.
+say "Invariant 1b — the stripped config is still structurally whole"
+python3 tools/strip.py > /dev/null
+missing=""
+for key in '^exporters:' '^service:' '^    traces:' '^    metrics:' '^    logs:' 'send_batch_size'; do
+  grep -qE "$key" collector-config.yaml || missing="$missing $key"
+done
+if [[ -z $missing ]]; then
+  ok "exporters/service and all three pipelines survive the strip"
+else
+  bad "strip commented out structural keys:$missing — line numbers in tools/strip.py have drifted"
+fi
+git checkout -q -- .
+
 # ── Invariant 2: unstrip is idempotent and tolerates hand-done work ─────────
 # Attendees toggle the lines *between* the markers, so the markers survive and
 # a finished block looks unfinished to a marker match. Running catch-up over
