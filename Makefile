@@ -24,6 +24,7 @@ export
 .PHONY: help install install-backend install-frontend install-inventory install-kitchen \
 	run-stack run-backend run-frontend run-inventory run-kitchen \
 	check-collector-config run-collector \
+	catchup-ch02 catchup-ch03 catchup-ch04 catchup-ch05 catchup-ch06 reset \
 	clean clean-deps
 
 help:
@@ -41,6 +42,10 @@ help:
 	@echo "  make run-stack              all five services, dependencies ordered for you"
 	@echo ""
 	@echo "Then open http://localhost:5173 in the browser."
+	@echo ""
+	@echo "Fell behind? Catch up to the end of any chapter, in place:"
+	@echo "  make catchup-ch02           ...through make catchup-ch06"
+	@echo "  make reset                  Discard your edits, back to the uninstrumented start"
 	@echo ""
 	@echo "Housekeeping:"
 	@echo "  make clean                  Delete build output and caches (keeps node_modules)"
@@ -112,17 +117,20 @@ clean-deps: clean
 # The check is not defensive padding. A bind mount against a host path that
 # does not exist makes the daemon create a *directory* there — so a missing
 # collector-config.yaml would silently leave a directory of that name sitting
-# in the repo, and the real file could then never be written. At workshop
-# start the config is deliberately absent (it is the Chapter 03 asset), so
-# this is the expected path on day one, not an edge case.
+# in the repo, and the real file could then never be written.
+#
+# The file is tracked on every workshop branch, so this should never fire. It
+# used to be the expected state on day one, back when the config was deleted
+# on the starting branch and handed out as a chapter asset; it is now present
+# from the start with its Datadog exporter commented out, which is what makes
+# Chapter 02 an uncomment rather than a file-creation exercise.
 check-collector-config:
 	@test -f collector-config.yaml || { \
 		echo ""; \
 		echo "  collector-config.yaml not found."; \
 		echo ""; \
-		echo "  That is expected before Chapter 03 — the Collector config is"; \
-		echo "  supplied as a workshop asset. Add it to the repo root, then"; \
-		echo "  run this target again."; \
+		echo "  It is tracked in this repo, so this means it was deleted."; \
+		echo "  Restore it with:  git checkout -- collector-config.yaml"; \
 		echo ""; \
 		exit 1; \
 	}
@@ -209,3 +217,41 @@ run-frontend:
 	VITE_OTLP_PROXY_TARGET=http://localhost:4318 \
 	VITE_OTEL_SERVICE_NAME=tracey-frontend \
 	npm run dev -- --host 0.0.0.0 --port 5173 --strictPort
+
+# ── Catching up ─────────────────────────────────────────────────────────────
+# Each target uncomments every exercise up to and including that chapter, in
+# place, so `make catchup-ch03` leaves the tree exactly as it should look at
+# the end of Chapter 03. Chapter N's guide points at catchup-ch(N-1), because
+# what an attendee needs is the state their chapter *starts* from.
+#
+# This replaces the per-chapter `workshop/solution-ch0N` branches the workshop
+# used to carry, and suits the job better in three ways: it works on a dirty
+# tree (checking out another branch refuses), it touches only the marked
+# blocks rather than resetting every file, and it is cumulative — so one
+# command gets an attendee from wherever they are to the state they need.
+#
+# Safe to run twice, and safe over work already done by hand: a block that is
+# already uncommented is reported and left alone. See tools/unstrip.py.
+catchup-ch02:
+	@python3 tools/unstrip.py 2.1
+
+catchup-ch03: catchup-ch02
+	@python3 tools/unstrip.py 3.1 3.2 3.3
+
+catchup-ch04: catchup-ch03
+	@python3 tools/unstrip.py 4.1
+
+catchup-ch05: catchup-ch04
+	@python3 tools/unstrip.py 5.1 5.2 5.3
+
+catchup-ch06: catchup-ch05
+	@python3 tools/unstrip.py 6.1 6.2
+
+# The full reset: throw away every edit and go back to the uninstrumented
+# starting point. Untracked files are left alone, so .env survives — which is
+# the whole reason it is gitignored.
+#
+# Pair it with a catchup target to land anywhere from any state:
+#   make reset catchup-ch04
+reset:
+	@git checkout -- . && echo "Reset to the uninstrumented starting point. Your .env is untouched."
