@@ -171,6 +171,15 @@ run-collector: check-collector-config
 # end up in a vendor's index for the retention period. The conventions default
 # it off; claude.ts also defaults it off when unset. It is on here because
 # exactly one person decided so, once, in a file everyone can read.
+#
+# OTEL_RESOURCE_ATTRIBUTES=dd_llmobs_enabled=true is the opt-in for converting
+# OTel GenAI spans into Datadog Agent Observability, required since
+# 2026-10-07. Without it the spans still reach APM with every gen_ai.*
+# attribute intact, but Agent Observability never renders them and the cost
+# breakdowns stay empty. Backend only: the attribute enables conversion for
+# the whole trace when set on any span in it, and this is the only service
+# producing gen_ai.* spans. Kept in step with compose.yaml, which sets the
+# same variable for the containerised path.
 run-backend:
 	cd backend && \
 	PORT=4000 \
@@ -178,6 +187,7 @@ run-backend:
 	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
 	OTEL_LOG_LEVEL=error \
 	OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true \
+	OTEL_RESOURCE_ATTRIBUTES=dd_llmobs_enabled=true \
 	AWS_REGION=$${AWS_REGION} \
 	AWS_BEARER_TOKEN_BEDROCK=$${AWS_BEARER_TOKEN_BEDROCK} \
 	BEDROCK_MODEL_ID=$${BEDROCK_MODEL_ID} \

@@ -117,6 +117,18 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318
       OTEL_LOG_LEVEL: error
       OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: 'true'
+      # Converting OTel GenAI spans into Datadog Agent Observability is opt-in
+      # as of 2026-10-07, and this is the opt-in. Without it the gen_ai.* spans
+      # still reach APM and still carry every attribute, but Agent
+      # Observability never renders them as prompt/response pairs and the cost
+      # breakdowns stay empty — which is most of what this workshop is for.
+      #
+      # Only the backend needs it: the attribute enables conversion for the
+      # *whole trace* when it is on any span in that trace, and this is the
+      # only service that produces gen_ai.* spans. NodeSDK's default resource
+      # detectors include envDetector, so this merges with the service.name
+      # resource otel.ts sets rather than replacing it.
+      OTEL_RESOURCE_ATTRIBUTES: dd_llmobs_enabled=true
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:?set AWS_BEARER_TOKEN_BEDROCK in .env}
       # Unset is fine — claude.ts falls back to the lab's model id.
