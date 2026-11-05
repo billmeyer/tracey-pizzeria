@@ -84,7 +84,15 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters:
-#        - debug
+        # Active, like the traces and logs pipelines above, and that matters
+        # for more than symmetry. The workshop's starting state comments out
+        # the otlp_http/datadog exporter, and a pipeline whose only exporter
+        # is commented out is an invalid config -- so the whole pipeline would
+        # have to go with it, leaving every Node service POSTing metrics at an
+        # endpoint that answers 404 every ten seconds. With `debug` here the
+        # metrics pipeline survives the strip exactly the way traces and logs
+        # do, and Chapter 01 is quiet.
+        - debug
         - otlp_http/datadog
     logs:
       receivers: [otlp]
