@@ -40,11 +40,17 @@ processors:
   # Express middleware spans beneath it. Left in, they bury the spans the
   # workshop actually cares about in the debug exporter's output.
   #
-  # Matching on http.route rather than the span name catches the children too —
-  # the Express instrumentation stamps the route onto its middleware and
-  # request-handler spans, which are named "middleware - ..." rather than
-  # "GET /healthz". The name check is the fallback for any span that carries no
-  # route attribute.
+  # Two matchers because the healthcheck produces two kinds of span: the HTTP
+  # server span, named "GET /healthz", and Express's request-handler span,
+  # which carries http.route but is named "request handler - /healthz".
+  #
+  # This filter used to miss most of the volume, and could not have caught it:
+  # the flood was `middleware - jsonParser` and `middleware - patched`, and the
+  # first of those carries no http.route at all. Middleware layers are now
+  # suppressed at the SDK instead (ignoreLayersType in each service's otel.ts),
+  # which is both cheaper than filtering spans that should never have been
+  # created and the only way to keep them out of the debug exporter — a
+  # processor on the Datadog pipeline cannot do that.
   filter/healthz:
     error_mode: ignore
     traces:

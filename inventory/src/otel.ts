@@ -3,10 +3,12 @@
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
-import { ExpressInstrumentation } from '@opentelemetry/instrumentation-express';
+import {
+  ExpressInstrumentation,
+  ExpressLayerType,
+} from '@opentelemetry/instrumentation-express';
 import { UndiciInstrumentation } from '@opentelemetry/instrumentation-undici';
 import { NetInstrumentation } from '@opentelemetry/instrumentation-net';
-import { RouterInstrumentation } from '@opentelemetry/instrumentation-router';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 
@@ -21,9 +23,9 @@ const sdk = new NodeSDK({
   }),
   // Named individually rather than via getNodeAutoInstrumentations().
   //
-  // These five are exactly the ones that were emitting spans under the
-  // meta-package — verified by reading the InstrumentationScope values the
-  // Collector received — so the traces are unchanged. What goes away is the
+  // These four are exactly the ones that were emitting *useful* spans under
+  // the meta-package — verified by reading the InstrumentationScope values the
+  // Collector received. What goes away is the
   // other 44 dependencies it pulls in, including five cloud resource
   // detectors this app never uses. The GCP one was the last source of
   // deprecated transitive packages (gcp-metadata -> gaxios -> node-fetch ->
@@ -33,12 +35,26 @@ const sdk = new NodeSDK({
   // undici is the one to not drop by accident: it instruments fetch, which is
   // how the backend reaches inventory and kitchen, and therefore how
   // traceparent propagates across services.
+  //
+  // instrumentation-router was dropped. Express 5 delegates routing to the
+  // standalone `router` package, so that instrumentation ends up wrapping
+  // Express's *internal* router and duplicating instrumentation-express —
+  // which is why its spans arrived named `middleware - patched`:
+  // `router.name` is the function's own name, and by then the function was
+  // already instrumentation-express's monkey-patch. Instrumentation wrapping
+  // instrumentation, for no extra information. It is still in package.json;
+  // removing it would rewrite three lockfiles for no runtime gain.
   instrumentations: [
     new HttpInstrumentation(),
-    new ExpressInstrumentation(),
+    new ExpressInstrumentation({
+      // One span per middleware, per request, is almost all noise here:
+      // `middleware - jsonParser` and friends say nothing a reader wants
+      // and bury the spans that do. Route and request-handler spans are
+      // kept -- those carry http.route and are what the trace is read by.
+      ignoreLayersType: [ExpressLayerType.MIDDLEWARE],
+    }),
     new UndiciInstrumentation(),
     new NetInstrumentation(),
-    new RouterInstrumentation(),
   ],
 });
 
