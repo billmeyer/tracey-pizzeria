@@ -168,16 +168,18 @@ function toGenAIOutputMessages(response: ClaudeResponse): string {
  */
 function requestAttributes(request: ClaudeRequest) {
   return {
-    [ATTR_GEN_AI_OPERATION_NAME]: GEN_AI_OPERATION_NAME_VALUE_CHAT,
-    [ATTR_GEN_AI_PROVIDER_NAME]: GEN_AI_PROVIDER_NAME_VALUE_AWS_BEDROCK,
-    [ATTR_GEN_AI_REQUEST_MODEL]: request.model,
-    [ATTR_GEN_AI_REQUEST_MAX_TOKENS]: request.max_tokens,
-    // Gated — see captureMessageContent above. Note the metrics and every
-    // other attribute on this span are unaffected: turning content capture off
-    // costs you the prompt text, not the observability.
-    ...(captureMessageContent
-      ? { [ATTR_GEN_AI_INPUT_MESSAGES]: toGenAIInputMessages(request.system, request.messages) }
-      : {}),
+    // ── Exercise 3.1 ── select the lines below, toggle comments once ──
+    // [ATTR_GEN_AI_OPERATION_NAME]: GEN_AI_OPERATION_NAME_VALUE_CHAT,
+    // [ATTR_GEN_AI_PROVIDER_NAME]: GEN_AI_PROVIDER_NAME_VALUE_AWS_BEDROCK,
+    // [ATTR_GEN_AI_REQUEST_MODEL]: request.model,
+    // [ATTR_GEN_AI_REQUEST_MAX_TOKENS]: request.max_tokens,
+    // // Gated — see captureMessageContent above. Note the metrics and every
+    // // other attribute on this span are unaffected: turning content capture off
+    // // costs you the prompt text, not the observability.
+    // ...(captureMessageContent
+    //   ? { [ATTR_GEN_AI_INPUT_MESSAGES]: toGenAIInputMessages(request.system, request.messages) }
+    //   : {}),
+    // ── end Exercise 3.1 ──
   };
 }
 
@@ -205,27 +207,31 @@ function recordResponse(
   response: ClaudeResponse,
   elapsedSeconds: number
 ): void {
-  if (captureMessageContent) {
-    span.setAttribute(ATTR_GEN_AI_OUTPUT_MESSAGES, toGenAIOutputMessages(response));
-  }
-  span.setAttribute(ATTR_GEN_AI_RESPONSE_ID, response.id);
-  span.setAttribute(ATTR_GEN_AI_RESPONSE_MODEL, response.model);
-  span.setAttribute(ATTR_GEN_AI_RESPONSE_FINISH_REASONS, [response.stop_reason ?? 'unknown']);
-  span.setAttribute(ATTR_GEN_AI_USAGE_INPUT_TOKENS, response.usage.input_tokens);
-  span.setAttribute(ATTR_GEN_AI_USAGE_OUTPUT_TOKENS, response.usage.output_tokens);
+  // ── Exercise 3.2 ── select the lines below, toggle comments once ──
+  // if (captureMessageContent) {
+  //   span.setAttribute(ATTR_GEN_AI_OUTPUT_MESSAGES, toGenAIOutputMessages(response));
+  // }
+  // span.setAttribute(ATTR_GEN_AI_RESPONSE_ID, response.id);
+  // span.setAttribute(ATTR_GEN_AI_RESPONSE_MODEL, response.model);
+  // span.setAttribute(ATTR_GEN_AI_RESPONSE_FINISH_REASONS, [response.stop_reason ?? 'unknown']);
+  // span.setAttribute(ATTR_GEN_AI_USAGE_INPUT_TOKENS, response.usage.input_tokens);
+  // span.setAttribute(ATTR_GEN_AI_USAGE_OUTPUT_TOKENS, response.usage.output_tokens);
+  // ── end Exercise 3.2 ──
 
-  const common = metricAttributes(request);
-  tokenUsage.record(response.usage.input_tokens, {
-    ...common,
-    [ATTR_GEN_AI_TOKEN_TYPE]: GEN_AI_TOKEN_TYPE_VALUE_INPUT,
-  });
-  tokenUsage.record(response.usage.output_tokens, {
-    ...common,
-    [ATTR_GEN_AI_TOKEN_TYPE]: GEN_AI_TOKEN_TYPE_VALUE_OUTPUT,
-  });
-  // Seconds, matching the convention's declared unit. Getting this wrong is
-  // silent and poisons every dashboard built on it.
-  operationDuration.record(elapsedSeconds, common);
+  // ── Exercise 4.1 ── select the lines below, toggle comments once ──
+  // const common = metricAttributes(request);
+  // tokenUsage.record(response.usage.input_tokens, {
+  //   ...common,
+  //   [ATTR_GEN_AI_TOKEN_TYPE]: GEN_AI_TOKEN_TYPE_VALUE_INPUT,
+  // });
+  // tokenUsage.record(response.usage.output_tokens, {
+  //   ...common,
+  //   [ATTR_GEN_AI_TOKEN_TYPE]: GEN_AI_TOKEN_TYPE_VALUE_OUTPUT,
+  // });
+  // // Seconds, matching the convention's declared unit. Getting this wrong is
+  // // silent and poisons every dashboard built on it.
+  // operationDuration.record(elapsedSeconds, common);
+  // ── end Exercise 4.1 ──
 }
 
 /** The failure counterpart of recordResponse. */
@@ -235,15 +241,21 @@ function recordError(
   error: Error,
   elapsedSeconds: number
 ): void {
-  span.setAttribute(ATTR_ERROR_TYPE, error.name);
-  // Failed calls still took time, and the convention carries error.type as a
-  // dimension so the success and failure latencies stay separable.
-  operationDuration.record(elapsedSeconds, {
-    ...metricAttributes(request),
-    [ATTR_ERROR_TYPE]: error.name,
-  });
-  span.recordException(error);
-  span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+  // ── Exercise 3.3 ── select the lines below, toggle comments once ──
+  // span.setAttribute(ATTR_ERROR_TYPE, error.name);
+  // ── end Exercise 3.3 ──
+  // ── Exercise 4.1 ── select the lines below, toggle comments once ──
+  // // Failed calls still took time, and the convention carries error.type as a
+  // // dimension so the success and failure latencies stay separable.
+  // operationDuration.record(elapsedSeconds, {
+  //   ...metricAttributes(request),
+  //   [ATTR_ERROR_TYPE]: error.name,
+  // });
+  // ── end Exercise 4.1 ──
+  // ── Exercise 3.3 ── select the lines below, toggle comments once ──
+  // span.recordException(error);
+  // span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+  // ── end Exercise 3.3 ──
 }
 
 /**

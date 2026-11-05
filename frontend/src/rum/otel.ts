@@ -271,204 +271,214 @@ export async function initOtelRum(options: InitOtelRumOptions): Promise<void> {
         return;
     }
 
-    const applicationId = import.meta.env.VITE_DD_RUM_APPLICATION_ID || 'YOUR_RUM_APPLICATION_ID';
-    // Relative by default: exports go to the dev server's `/otlp` proxy, which
-    // forwards to the Collector (see vite.config.ts). Same-origin, so the
-    // browser issues no CORS preflight — which matters because an OTLP POST can
-    // never be a CORS "simple request" (its content type is application/json or
-    // x-protobuf), so a cross-origin endpoint must answer a preflight for every
-    // export. Going through the proxy also means the Collector needs no
-    // published port and the page works unchanged when served to a remote
-    // browser, where `localhost:4318` would resolve to the viewer's own machine.
-    //
-    // Set VITE_OTEL_COLLECTOR_URL to an absolute URL to bypass the proxy and
-    // post straight at a Collector; its cors.allowed_origins must then list this
-    // page's origin.
-    //
-    // Resolved against the page origin rather than passed through as the bare
-    // relative path, and that is load-bearing: startTracesSdk and startLogsSdk
-    // gate the OTLP exporter behind `if (URL.parse(endpoint))`, and URL.parse
-    // returns null for a relative URL with no base. A bare "/otlp" therefore
-    // *silently* skips the batch processor — no error, the console exporter
-    // keeps printing, and nothing ever reaches the Collector. Resolving here
-    // yields an absolute same-origin URL, which satisfies that check while
-    // still avoiding the preflight. An already-absolute value passes through
-    // unchanged; the trailing-slash strip stops `http://host/` + `/v1/traces`
-    // from becoming a double slash.
-    const collectorUrl = new URL(
-        import.meta.env.VITE_OTEL_COLLECTOR_URL || '/otlp',
-        window.location.origin,
-    ).href.replace(/\/$/, '');
-    const serviceName = import.meta.env.VITE_OTEL_SERVICE_NAME || 'tracey-frontend';
-    const serviceVersion = import.meta.env.VITE_OTEL_SERVICE_VERSION || '0.0.1';
+    // ── Exercise 5.1 ── select the lines below, toggle comments once ──
+    // const applicationId = import.meta.env.VITE_DD_RUM_APPLICATION_ID || 'YOUR_RUM_APPLICATION_ID';
+    // // Relative by default: exports go to the dev server's `/otlp` proxy, which
+    // // forwards to the Collector (see vite.config.ts). Same-origin, so the
+    // // browser issues no CORS preflight — which matters because an OTLP POST can
+    // // never be a CORS "simple request" (its content type is application/json or
+    // // x-protobuf), so a cross-origin endpoint must answer a preflight for every
+    // // export. Going through the proxy also means the Collector needs no
+    // // published port and the page works unchanged when served to a remote
+    // // browser, where `localhost:4318` would resolve to the viewer's own machine.
+    // //
+    // // Set VITE_OTEL_COLLECTOR_URL to an absolute URL to bypass the proxy and
+    // // post straight at a Collector; its cors.allowed_origins must then list this
+    // // page's origin.
+    // //
+    // // Resolved against the page origin rather than passed through as the bare
+    // // relative path, and that is load-bearing: startTracesSdk and startLogsSdk
+    // // gate the OTLP exporter behind `if (URL.parse(endpoint))`, and URL.parse
+    // // returns null for a relative URL with no base. A bare "/otlp" therefore
+    // // *silently* skips the batch processor — no error, the console exporter
+    // // keeps printing, and nothing ever reaches the Collector. Resolving here
+    // // yields an absolute same-origin URL, which satisfies that check while
+    // // still avoiding the preflight. An already-absolute value passes through
+    // // unchanged; the trailing-slash strip stops `http://host/` + `/v1/traces`
+    // // from becoming a double slash.
+    // const collectorUrl = new URL(
+    //     import.meta.env.VITE_OTEL_COLLECTOR_URL || '/otlp',
+    //     window.location.origin,
+    // ).href.replace(/\/$/, '');
+    // const serviceName = import.meta.env.VITE_OTEL_SERVICE_NAME || 'tracey-frontend';
+    // const serviceVersion = import.meta.env.VITE_OTEL_SERVICE_VERSION || '0.0.1';
 
-    // ── Resource detection ──────────────────────────────────────────────────────
-    // browserDetector contributes user_agent.original and browser.language,
-    // plus browser.platform/brands/mobile where navigator.userAgentData is
-    // supported. It reads those synchronously, so there are no async resource
-    // attributes to wait on here.
-    const resource = resourceFromAttributes({
-        [ATTR_SERVICE_NAME]: serviceName,
-        [ATTR_SERVICE_VERSION]: serviceVersion,
-    }).merge(detectResources({ detectors: [browserDetector] }));
+    // // ── Resource detection ──────────────────────────────────────────────────────
+    // // browserDetector contributes user_agent.original and browser.language,
+    // // plus browser.platform/brands/mobile where navigator.userAgentData is
+    // // supported. It reads those synchronously, so there are no async resource
+    // // attributes to wait on here.
+    // const resource = resourceFromAttributes({
+    //     [ATTR_SERVICE_NAME]: serviceName,
+    //     [ATTR_SERVICE_VERSION]: serviceVersion,
+    // }).merge(detectResources({ detectors: [browserDetector] }));
 
-    // Both SDKs take a plain attribute bag rather than a Resource, and freeze
-    // it when they start — so the detected resource has to be flattened in
-    // here or it never reaches an exported span or log. App-specific
-    // attributes come last so they win any key collision.
-    const resourceAttributes = {
-        ...resource.attributes,
-        'datadog.application.id': applicationId,
-        [ATTR_BROWSER_DOCUMENT_URL_FULL]: window.location.href,
-        // Stable identifier for the document, independent of the URL, so the
-        // four steps are comparable in RUM even if paths change.
-        'traceys.pizzeria.route.id': options.routeId,
-    };
-    console.log(resourceAttributes);
+    // // Both SDKs take a plain attribute bag rather than a Resource, and freeze
+    // // it when they start — so the detected resource has to be flattened in
+    // // here or it never reaches an exported span or log. App-specific
+    // // attributes come last so they win any key collision.
+    // const resourceAttributes = {
+    //     ...resource.attributes,
+    //     'datadog.application.id': applicationId,
+    //     [ATTR_BROWSER_DOCUMENT_URL_FULL]: window.location.href,
+    //     // Stable identifier for the document, independent of the URL, so the
+    //     // four steps are comparable in RUM even if paths change.
+    //     'traceys.pizzeria.route.id': options.routeId,
+    // };
+    // console.log(resourceAttributes);
 
-    // ── Sessions ────────────────────────────────────────────────────────────────
-    // The session processors must run BEFORE the export processors so the
-    // session.id attribute is set on each log record before it is exported.
-    const sessionManager = createSessionManager({
-        sessionIdGenerator: createDefaultSessionIdGenerator(),
-        sessionStore: createLocalStorageSessionStore(),
-        maxDuration: SESSION_MAX_DURATION_SECONDS,
-        inactivityTimeout: SESSION_INACTIVITY_TIMEOUT_SECONDS,
-    });
+    // // ── Sessions ────────────────────────────────────────────────────────────────
+    // // The session processors must run BEFORE the export processors so the
+    // // session.id attribute is set on each log record before it is exported.
+    // const sessionManager = createSessionManager({
+    //     sessionIdGenerator: createDefaultSessionIdGenerator(),
+    //     sessionStore: createLocalStorageSessionStore(),
+    //     maxDuration: SESSION_MAX_DURATION_SECONDS,
+    //     inactivityTimeout: SESSION_INACTIVITY_TIMEOUT_SECONDS,
+    // });
 
-    // Hand the manager to the UI layer before start() below, so the footer's
-    // observer is attached in time for the first onSessionStarted rather than
-    // having to poll for it.
-    registerSessionManager(sessionManager);
+    // // Hand the manager to the UI layer before start() below, so the footer's
+    // // observer is attached in time for the first onSessionStarted rather than
+    // // having to poll for it.
+    // registerSessionManager(sessionManager);
 
-    // ── Document context ────────────────────────────────────────────────────────
-    // Reads `location.href` as each span starts and each log record is emitted,
-    // so `browser.document.url.full` follows soft navigations with no bookkeeping.
-    const documentProvider = createLocationDocumentProvider();
+    // // ── Document context ────────────────────────────────────────────────────────
+    // // Reads `location.href` as each span starts and each log record is emitted,
+    // // so `browser.document.url.full` follows soft navigations with no bookkeeping.
+    // const documentProvider = createLocationDocumentProvider();
 
-    // ── Span processors ───────────────────────────────────────────────────────
-    // context first (so session.id, browser.document.url.full and the
-    // traceys.pizzeria.* attributes are set) → console → batching OTLP exporter,
-    // which startTracesSdk appends because exportConfig is set.
-    const spanProcessors = [
-        createSessionSpanProcessor(sessionManager),
-        createDocumentSpanProcessor(documentProvider),
-        createOrderContextSpanProcessor(),
-        new SimpleSpanProcessor({ exporter: new ConsoleSpanExporter() }),
-    ];
+    // // ── Span processors ───────────────────────────────────────────────────────
+    // // context first (so session.id, browser.document.url.full and the
+    // // traceys.pizzeria.* attributes are set) → console → batching OTLP exporter,
+    // // which startTracesSdk appends because exportConfig is set.
+    // const spanProcessors = [
+    //     createSessionSpanProcessor(sessionManager),
+    //     createDocumentSpanProcessor(documentProvider),
+    //     createOrderContextSpanProcessor(),
+    //     new SimpleSpanProcessor({ exporter: new ConsoleSpanExporter() }),
+    // ];
 
-    console.log("Starting OTel Traces SDK");
-    const tracesSdk = startTracesSdk({
-        serviceName,
-        resourceAttributes,
-        processors: spanProcessors,
-        exportConfig: {url: `${collectorUrl}/v1/traces`},
-        batchProcessorConfig: {scheduledDelayMillis: TRACES_SCHEDULED_DELAY_MS},
-    });
+    // console.log("Starting OTel Traces SDK");
+    // const tracesSdk = startTracesSdk({
+    //     serviceName,
+    //     resourceAttributes,
+    //     processors: spanProcessors,
+    //     exportConfig: {url: `${collectorUrl}/v1/traces`},
+    //     batchProcessorConfig: {scheduledDelayMillis: TRACES_SCHEDULED_DELAY_MS},
+    // });
 
-    // ── Log record processors ─────────────────────────────────────────────────
-    const logProcessors = [
-        createSessionLogRecordProcessor(sessionManager),
-        createDocumentLogRecordProcessor(documentProvider),
-        createOrderContextLogRecordProcessor(),
-        // After the context processors, before the exporters: it only fills in
-        // a spanContext the record does not already have, and both the console
-        // and OTLP exporters downstream need to see the filled-in value.
-        createPageTraceLogRecordProcessor(),
-        new SimpleLogRecordProcessor({ exporter: new ConsoleLogRecordExporter() }),
-    ];
+    // // ── Log record processors ─────────────────────────────────────────────────
+    // const logProcessors = [
+    //     createSessionLogRecordProcessor(sessionManager),
+    //     createDocumentLogRecordProcessor(documentProvider),
+    //     createOrderContextLogRecordProcessor(),
+    //     // After the context processors, before the exporters: it only fills in
+    //     // a spanContext the record does not already have, and both the console
+    //     // and OTLP exporters downstream need to see the filled-in value.
+    //     createPageTraceLogRecordProcessor(),
+    //     new SimpleLogRecordProcessor({ exporter: new ConsoleLogRecordExporter() }),
+    // ];
 
-    console.log("Starting OTel Logs SDK");
-    const logsSdk = startLogsSdk({
-        serviceName,
-        resourceAttributes,
-        processors: logProcessors,
-        exportConfig: {url: `${collectorUrl}/v1/logs`},
-        batchProcessorConfig: {scheduledDelayMillis: LOGS_SCHEDULED_DELAY_MS},
-    });
+    // console.log("Starting OTel Logs SDK");
+    // const logsSdk = startLogsSdk({
+    //     serviceName,
+    //     resourceAttributes,
+    //     processors: logProcessors,
+    //     exportConfig: {url: `${collectorUrl}/v1/logs`},
+    //     batchProcessorConfig: {scheduledDelayMillis: LOGS_SCHEDULED_DELAY_MS},
+    // });
 
-    activeSdks = [tracesSdk, logsSdk];
+    // activeSdks = [tracesSdk, logsSdk];
+    // ── end Exercise 5.1 ──
 
     // See https://docs.google.com/document/d/1eQOOG9973NB27xxiB9zJcrTWHcx-F20S7gUVXAw_vEQ/edit?tab=t.crjfpnx16m1w#heading=h.r6gqdymwfioc
     // See https://github.com/open-telemetry/opentelemetry-browser/blob/main/packages/instrumentation/README.md
-    registerInstrumentations({
-        instrumentations: [
-            new SessionInstrumentation(sessionManager), // Session lifecycle -> event_name "session.start" / "session.end" -> Datadog RUM Session
-            new UserActionInstrumentation({             // User Actions -> Clicks -> event_name "browser.user_action.click" -> Datadog RUM Action
-                applyCustomLogRecordData: promoteNamedAction,
-            }),
-            new ErrorsInstrumentation(),                // Uncaught errors -> event_name "exception" -> Datadog RUM Error
-            new ConsoleInstrumentation(),               // console.* calls -> log records
-            new NavigationInstrumentation(),            // Page view marker -> event_name "browser.navigation"
-            new NavigationTimingInstrumentation(),      // Page navigation -> event_name "browser.navigation_timing" -> Datadog RUM Resource
-            new WebVitalsInstrumentation(),             // Core Web Vitals -> event_name "browser.web_vital"
+    // ── Exercise 5.2 ── select the lines below, toggle comments once ──
+    // registerInstrumentations({
+    //     instrumentations: [
+    //         new SessionInstrumentation(sessionManager), // Session lifecycle -> event_name "session.start" / "session.end" -> Datadog RUM Session
+    //         new UserActionInstrumentation({             // User Actions -> Clicks -> event_name "browser.user_action.click" -> Datadog RUM Action
+    //             applyCustomLogRecordData: promoteNamedAction,
+    //         }),
+    //         new ErrorsInstrumentation(),                // Uncaught errors -> event_name "exception" -> Datadog RUM Error
+    //         new ConsoleInstrumentation(),               // console.* calls -> log records
+    //         new NavigationInstrumentation(),            // Page view marker -> event_name "browser.navigation"
+    //         new NavigationTimingInstrumentation(),      // Page navigation -> event_name "browser.navigation_timing" -> Datadog RUM Resource
+    //         new WebVitalsInstrumentation(),             // Core Web Vitals -> event_name "browser.web_vital"
 
-            new ResourceTimingInstrumentation({
-                // Without this list, `browser.resource_timing` is ~90% of all
-                // log volume and buries every traceys.pizzeria.* event the pages emit.
-                // Note this is a *separate* filter from the `ignoreUrls` on
-                // Fetch/Xhr below: that one suppresses the request *spans*,
-                // this one suppresses the resource *log records*.
-                ignoreUrls: RESOURCE_TIMING_IGNORE_URLS,
+    //         new ResourceTimingInstrumentation({
+    //             // Without this list, `browser.resource_timing` is ~90% of all
+    //             // log volume and buries every traceys.pizzeria.* event the pages emit.
+    //             // Note this is a *separate* filter from the `ignoreUrls` on
+    //             // Fetch/Xhr below: that one suppresses the request *spans*,
+    //             // this one suppresses the resource *log records*.
+    //             ignoreUrls: RESOURCE_TIMING_IGNORE_URLS,
 
-                // Process 100 resources per batch (default: 50)
-                batchSize: 100,
+    //             // Process 100 resources per batch (default: 50)
+    //             batchSize: 100,
 
-                // Wait max 2 seconds for idle time before forcing processing (default: 1000)
-                forceProcessingAfter: 2000,
+    //             // Wait max 2 seconds for idle time before forcing processing (default: 1000)
+    //             forceProcessingAfter: 2000,
 
-                // Spend max 100ms processing per idle callback (default: 50)
-                maxProcessingTime: 100,
+    //             // Spend max 100ms processing per idle callback (default: 50)
+    //             maxProcessingTime: 100,
 
-                // Maximum queue size before forcing immediate flush (default: 1000)
-                maxQueueSize: 2000,
-            }),
+    //             // Maximum queue size before forcing immediate flush (default: 1000)
+    //             maxQueueSize: 2000,
+    //         }),
 
-            // Last, and the only one here producing *spans* rather than log
-            // records. Covers fetch("/api/...") calls, propagating W3C
-            // traceparent so Datadog can correlate this session with the
-            // backend's APM trace.
-            //
-            // There is deliberately no XHR instrumentation alongside it: the
-            // app uses fetch exclusively, and registering an unused transport's
-            // instrumentation buys nothing but patched globals.
-            // Scoped to this app's own API, and deliberately not `[/.*/]`.
-            //
-            // The option is an *allowlist of origins to attach `traceparent`
-            // to*, and the permissive version attaches it to every cross-origin
-            // request the page makes — analytics beacons, font CDNs, embedded
-            // third-party widgets. None of those named `traceparent` in their
-            // `Access-Control-Allow-Headers`, so the browser fails the preflight
-            // and the request never goes out at all: a header added for
-            // observability breaks the feature it was watching. It also leaks
-            // internal trace ids to anyone the page happens to talk to.
-            //
-            // `/\/api\//` matches exactly the calls that reach a service we
-            // control and that can therefore continue the trace. Same-origin
-            // requests are unaffected either way — this option only governs
-            // cross-origin ones.
-            new FetchInstrumentation({
-                propagateTraceHeaderCorsUrls: [/\/api\//],
-                ignoreUrls: [OTLP_EXPORT_URL_PATTERN],
-            }),
+    //         // Last, and the only one here producing *spans* rather than log
+    //         // records. Covers fetch("/api/...") calls, propagating W3C
+    //         // traceparent so Datadog can correlate this session with the
+    //         // backend's APM trace.
+    //         //
+    //         // There is deliberately no XHR instrumentation alongside it: the
+    //         // app uses fetch exclusively, and registering an unused transport's
+    //         // instrumentation buys nothing but patched globals.
+    //         // Scoped to this app's own API, and deliberately not `[/.*/]`.
+    //         //
+    //         // The option is an *allowlist of origins to attach `traceparent`
+    //         // to*, and the permissive version attaches it to every cross-origin
+    //         // request the page makes — analytics beacons, font CDNs, embedded
+    //         // third-party widgets. None of those named `traceparent` in their
+    //         // `Access-Control-Allow-Headers`, so the browser fails the preflight
+    //         // and the request never goes out at all: a header added for
+    //         // observability breaks the feature it was watching. It also leaks
+    //         // internal trace ids to anyone the page happens to talk to.
+    //         //
+    //         // `/\/api\//` matches exactly the calls that reach a service we
+    //         // control and that can therefore continue the trace. Same-origin
+    //         // requests are unaffected either way — this option only governs
+    //         // cross-origin ones.
+    //         // ── Exercise 6.1 ── select the lines below, toggle comments once ──
+    //         // new FetchInstrumentation({
+    //         //     propagateTraceHeaderCorsUrls: [/\/api\//],
+    //         //     ignoreUrls: [OTLP_EXPORT_URL_PATTERN],
+    //         // }),
 
-            new XhrInstrumentation({
-                propagateTraceHeaderCorsUrls: [/\/api\//],
-                ignoreUrls: [OTLP_EXPORT_URL_PATTERN],
-            }),
-        ],
-    });
+    //         // new XhrInstrumentation({
+    //         //     propagateTraceHeaderCorsUrls: [/\/api\//],
+    //         //     ignoreUrls: [OTLP_EXPORT_URL_PATTERN],
+    //         // }),
+    //         // ── end Exercise 6.1 ──
+    //     ],
+    // });
+    // ── end Exercise 5.2 ──
 
     // Start (or restore) the session only after all instrumentations —
     // including SessionInstrumentation's observer — are wired up, so the
     // very first session.start event and the events it gates all fire.
-    await sessionManager.start();
+    // ── Exercise 5.3 ── select the lines below, toggle comments once ──
+    // await sessionManager.start();
+    // ── end Exercise 5.3 ──
 
     // Only now is the session id safe to read: start() resolves the restore
     // from localStorage, and reading before this point would mint a new
     // session instead (see session.ts). A session *restored* here fires no
     // onSessionStarted, so the footer needs this explicit nudge.
-    notifySessionReady();
+    // ── Exercise 5.3 ── select the lines below, toggle comments once ──
+    // notifySessionReady();
+    // ── end Exercise 5.3 ──
 
     // ── Ordering constraint, load-bearing ─────────────────────────────────
     // This document's root span, which the page-trace processor above uses to
@@ -482,7 +492,9 @@ export async function initOtelRum(options: InitOtelRumOptions): Promise<void> {
     // overwrote the stored session on every single document load: a new RUM
     // session id per page, and no session.start event either, because the
     // session was created before SessionInstrumentation's observer existed.
-    startPageTrace(options.routeId);
+    // ── Exercise 5.3 ── select the lines below, toggle comments once ──
+    // startPageTrace(options.routeId);
+    // ── end Exercise 5.3 ──
 }
 
 /**

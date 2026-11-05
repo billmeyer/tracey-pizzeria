@@ -66,16 +66,18 @@ exporters:
   debug:
     verbosity: detailed
 
-  # Datadog's OTLP intake, used only for browser RUM logs/spans.
-  otlp_http/datadog:
-    endpoint: https://otlp.${env:DD_SITE}
+# ── Exercise 2.1 ── select the lines below, toggle comments once ──
+#   # Datadog's OTLP intake, used only for browser RUM logs/spans.
+#   otlp_http/datadog:
+#     endpoint: https://otlp.${env:DD_SITE}
 
-    # Examples for specific signal paths:
-#    metrics_endpoint: https://otlp.${env:DD_SITE}/v1/metrics
-#    traces_endpoint: https://otlp.${env:DD_SITE}/v1/traces
-#    logs_endpoint: https://otlp.${env:DD_SITE}/v1/logs
-    headers:
-      dd-api-key: ${env:DD_API_KEY}
+#     # Examples for specific signal paths:
+# #    metrics_endpoint: https://otlp.${env:DD_SITE}/v1/metrics
+# #    traces_endpoint: https://otlp.${env:DD_SITE}/v1/traces
+# #    logs_endpoint: https://otlp.${env:DD_SITE}/v1/logs
+#     headers:
+#       dd-api-key: ${env:DD_API_KEY}
+# ── end Exercise 2.1 ──
 
 service:
   pipelines:
@@ -85,7 +87,9 @@ service:
       processors: [filter/healthz, batch]
       exporters:
         - debug
-        - otlp_http/datadog
+        # ── Exercise 2.1 ── select the lines below, toggle comments once ──
+        # - otlp_http/datadog
+        # ── end Exercise 2.1 ──
     metrics:
       receivers: [otlp]
       processors: [batch]
@@ -99,10 +103,14 @@ service:
         # metrics pipeline survives the strip exactly the way traces and logs
         # do, and Chapter 01 is quiet.
         - debug
-        - otlp_http/datadog
+        # ── Exercise 2.1 ── select the lines below, toggle comments once ──
+        # - otlp_http/datadog
+        # ── end Exercise 2.1 ──
     logs:
       receivers: [otlp]
       processors: [batch]
       exporters:
         - debug
-        - otlp_http/datadog
+        # ── Exercise 2.1 ── select the lines below, toggle comments once ──
+        # - otlp_http/datadog
+        # ── end Exercise 2.1 ──

@@ -22,7 +22,9 @@ import { emitStepCompletedAction, flushTelemetry } from './telemetry';
  */
 export async function hardNavigate(from: Step, to: Step): Promise<void> {
   emitStepCompletedAction(from, to);
-  await flushTelemetry();
+  // ── Exercise 6.2 ── select the lines below, toggle comments once ──
+  // await flushTelemetry();
+  // ── end Exercise 6.2 ──
   window.location.assign(STEP_PATHS[to]);
 }
 
@@ -33,6 +35,8 @@ export async function hardNavigate(from: Step, to: Step): Promise<void> {
  */
 export async function hardNavigateBack(from: Step, to: Step): Promise<void> {
   emitStepCompletedAction(from, to);
-  await flushTelemetry();
+  // ── Exercise 6.2 ── select the lines below, toggle comments once ──
+  // await flushTelemetry();
+  // ── end Exercise 6.2 ──
   window.location.replace(STEP_PATHS[to]);
 }
