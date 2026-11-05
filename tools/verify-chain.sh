@@ -24,6 +24,14 @@ trap cleanup EXIT
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 ok()   { printf '  \033[32mOK\033[0m   %s\n' "$*"; }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$*"; FAILED=1; }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$*"; }
+
+# Probe the Collector image once rather than per state. Docker may be absent,
+# stopped, or -- on a managed desktop -- demanding a fresh sign-in, and an
+# environment failure reported as six config FAILs sends you off debugging
+# entirely the wrong thing.
+COLLECTOR_OK=1
+docker run --rm otel/opentelemetry-collector-contrib:latest --help >/dev/null 2>&1 || COLLECTOR_OK=0
 
 [[ -z $(git status --porcelain) ]] || { echo "working tree is dirty; commit or stash first"; exit 1; }
 BASE=$(git rev-parse --abbrev-ref HEAD)
@@ -71,12 +79,16 @@ check_state() {
   local label=$1 bad_state=0
   (cd backend  && npx --no-install tsc --noEmit) || bad_state=1
   (cd frontend && npx --no-install tsc --noEmit) || bad_state=1
-  docker run --rm -v "$PWD/collector-config.yaml:/etc/otelcol/config.yaml:ro" \
-    -e DD_SITE=datadoghq.com -e DD_API_KEY=dummy \
-    otel/opentelemetry-collector-contrib:latest \
-    validate --config=/etc/otelcol/config.yaml >/dev/null 2>&1 || bad_state=1
+  if [[ $COLLECTOR_OK -eq 1 ]]; then
+    docker run --rm -v "$PWD/collector-config.yaml:/etc/otelcol/config.yaml:ro" \
+      -e DD_SITE=datadoghq.com -e DD_API_KEY=dummy \
+      otel/opentelemetry-collector-contrib:latest \
+      validate --config=/etc/otelcol/config.yaml >/dev/null 2>&1 || bad_state=1
+  fi
   [[ $bad_state -eq 0 ]] && ok "$label" || bad "$label"
 }
+
+[[ $COLLECTOR_OK -eq 1 ]] || skip "collector-config validation — Collector image unavailable (docker stopped, or sign-in required). TypeScript is still checked."
 
 if [[ $QUICK == --quick ]]; then
   echo "  skipped (--quick)"
