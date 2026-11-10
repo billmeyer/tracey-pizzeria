@@ -58,6 +58,28 @@ processors:
         - 'attributes["http.route"] == "/healthz"'
         - 'name == "GET /healthz"'
 
+  # Datadog's OTLP intake only accepts delta temporality for sums and
+  # histograms, and the OTel default is cumulative — so without this every
+  # metric export was rejected at the intake, which is why nothing showed up
+  # under Metrics while traces and logs arrived fine.
+  #
+  # The primary fix is upstream of here: all three Node services now set
+  # OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta (compose.yaml and
+  # the matching `make run-*` targets), which is strictly cheaper — the SDK
+  # already holds the previous value, whereas this processor has to keep a copy
+  # of every stream to subtract from.
+  #
+  # This stays anyway, and not only as a safety net for producers outside
+  # compose. The SDK's delta selector deliberately leaves UpDownCounter and
+  # ObservableUpDownCounter cumulative, so for those two instrument types this
+  # processor is the only thing doing the conversion.
+  #
+  # No include/exclude list on purpose: everything convertible should be
+  # converted, and gauges pass through untouched either way. State is per
+  # stream, so the first export after a Collector restart produces no delta —
+  # expect one missing interval, not a gap.
+  cumulativetodelta:
+
   batch:
     timeout: 5s
     send_batch_size: 512
@@ -65,6 +87,17 @@ processors:
 exporters:
   debug:
     verbosity: detailed
+
+  # Metrics get their own debug exporter at a lower verbosity. At `detailed` the
+  # exporter prints every data point of every histogram, every bucket boundary
+  # included — and because the reader exports on a 10s interval, idle histograms
+  # like undici's http.client.request.duration are re-printed in full forever,
+  # not just when a request happens. That one metric was most of the compose
+  # log. `basic` collapses an export to a single count line, which is all the
+  # metrics pipeline needs to prove it is alive; traces and logs keep the
+  # detailed dump the workshop reads them by.
+  debug/metrics:
+    verbosity: basic
 
   # Datadog's OTLP intake, used only for browser RUM logs/spans.
   otlp_http/datadog:
@@ -88,7 +121,10 @@ service:
         - otlp_http/datadog
     metrics:
       receivers: [otlp]
-      processors: [batch]
+      # cumulativetodelta before batch, for the same reason filter/healthz comes
+      # before it on the traces pipeline: do the per-point work while the points
+      # are still grouped by the export that produced them.
+      processors: [cumulativetodelta, batch]
       exporters:
         # Active, like the traces and logs pipelines above, and that matters
         # for more than symmetry. The workshop's starting state comments out
@@ -98,7 +134,7 @@ service:
         # endpoint that answers 404 every ten seconds. With `debug` here the
         # metrics pipeline survives the strip exactly the way traces and logs
         # do, and Chapter 01 is quiet.
-        - debug
+        - debug/metrics
         - otlp_http/datadog
     logs:
       receivers: [otlp]

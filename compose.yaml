@@ -13,6 +13,25 @@
 # the one binary a node image is guaranteed to have, so the probe cannot break
 # on a missing busybox applet.
 #
+# OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta on all three Node
+# services: Datadog's OTLP intake only accepts delta temporality for sums and
+# histograms, and the SDK default is cumulative. Setting it at the source is
+# cheaper than converting downstream — the Collector's cumulativetodelta has to
+# hold the previous value of every stream in memory to compute a difference the
+# SDK already had.
+#
+# It is honoured on every service for different reasons, both worth knowing:
+# backend builds its own OTLPMetricExporter but passes no temporalityPreference,
+# so the exporter falls back to this variable; inventory and kitchen configure no
+# reader at all and get NodeSDK's autoconfigured OTLP one, which reads the same
+# variable. Verified against exporter-metrics-otlp-http 0.300.0.
+#
+# cumulativetodelta stays in collector-config.yaml rather than being removed, and
+# not only as a belt-and-braces for anything exporting cumulative from outside
+# compose: the SDK's delta selector deliberately leaves UpDownCounter and
+# ObservableUpDownCounter cumulative, so the processor is the only thing
+# converting those two instrument types.
+#
 # Credentials come from the repo's .env, which compose reads automatically for
 # interpolation. DD_API_KEY and AWS_BEARER_TOKEN_BEDROCK use `:?` so a missing
 # value fails immediately with a named variable instead of surfacing later as a
@@ -55,6 +74,7 @@ services:
       PORT: 4001
       OTEL_SERVICE_NAME: tracey-inventory
       OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318
+      OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: delta
       OTEL_LOG_LEVEL: error
     volumes:
       - ./inventory/src:/app/src:ro
@@ -81,6 +101,7 @@ services:
       PORT: 4002
       OTEL_SERVICE_NAME: tracey-kitchen
       OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318
+      OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: delta
       OTEL_LOG_LEVEL: error
     volumes:
       - ./kitchen/src:/app/src:ro
@@ -115,6 +136,7 @@ services:
       PORT: 4000
       OTEL_SERVICE_NAME: tracey-backend
       OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318
+      OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: delta
       OTEL_LOG_LEVEL: error
       OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: 'true'
       # Converting OTel GenAI spans into Datadog Agent Observability is opt-in

@@ -164,6 +164,14 @@ run-collector: check-collector-config
 # `error` the terminal stays quiet while things work and prints the
 # ECONNREFUSED when they don't. Verified: at the default level a failing
 # export logs nothing, even with traffic flowing.
+#
+# OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta on all three, because
+# Datadog's OTLP intake only accepts delta for sums and histograms and the SDK
+# default is cumulative. Kept in step with compose.yaml, which sets it on the
+# containerised path and carries the full rationale — including why
+# collector-config.yaml keeps cumulativetodelta anyway (the SDK's delta selector
+# leaves UpDownCounter cumulative, so the processor still has work to do).
+#
 # OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true is a deliberate
 # *lab* setting, not a default worth copying. It puts the full prompt and
 # completion on every LLM span, which is the whole point of Chapter 05 — and in
@@ -185,6 +193,7 @@ run-backend:
 	PORT=4000 \
 	OTEL_SERVICE_NAME=tracey-backend \
 	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
+	OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta \
 	OTEL_LOG_LEVEL=error \
 	OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true \
 	OTEL_RESOURCE_ATTRIBUTES=dd_llmobs_enabled=true \
@@ -201,6 +210,7 @@ run-inventory:
 	PORT=4001 \
 	OTEL_SERVICE_NAME=tracey-inventory \
 	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
+	OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta \
 	OTEL_LOG_LEVEL=error \
 	npm run dev
 
@@ -209,6 +219,7 @@ run-kitchen:
 	PORT=4002 \
 	OTEL_SERVICE_NAME=tracey-kitchen \
 	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
+	OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta \
 	OTEL_LOG_LEVEL=error \
 	npm run dev
 
