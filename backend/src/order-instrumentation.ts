@@ -44,10 +44,13 @@ import {
 // use them. The gen_ai.tool.* group is experimental, hence /incubating rather
 // than the root.
 import {
+  ATTR_GEN_AI_OPERATION_NAME,
+  ATTR_GEN_AI_PROVIDER_NAME,
   ATTR_GEN_AI_TOOL_CALL_ID,
   ATTR_GEN_AI_TOOL_NAME,
   ATTR_GEN_AI_TOOL_TYPE,
   GEN_AI_OPERATION_NAME_VALUE_EXECUTE_TOOL,
+  GEN_AI_PROVIDER_NAME_VALUE_AWS_BEDROCK,
 } from '@opentelemetry/semantic-conventions/incubating';
 
 import type { ClaudeToolUse } from './claude';
@@ -150,6 +153,14 @@ export function withToolSpan<T>(block: ClaudeToolUse, call: () => Promise<T> | T
     {
       kind: SpanKind.INTERNAL,
       attributes: {
+        // The operation name and provider are what mark this span as part of
+        // the agent loop rather than an anonymous internal span: a backend
+        // reads gen_ai.operation.name to know *what kind* of GenAI step this is
+        // (`execute_tool`, the same literal the span name is built from) and
+        // gen_ai.provider.name to tie it to the `chat` span that asked for it,
+        // which carries the same provider.
+        [ATTR_GEN_AI_OPERATION_NAME]: GEN_AI_OPERATION_NAME_VALUE_EXECUTE_TOOL,
+        [ATTR_GEN_AI_PROVIDER_NAME]: GEN_AI_PROVIDER_NAME_VALUE_AWS_BEDROCK,
         [ATTR_GEN_AI_TOOL_NAME]: block.name,
         [ATTR_GEN_AI_TOOL_CALL_ID]: block.id,
         [ATTR_GEN_AI_TOOL_TYPE]: 'function',
