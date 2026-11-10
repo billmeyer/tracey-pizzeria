@@ -134,9 +134,28 @@ function toGenAIParts(content: GenAIContent): unknown[] {
       case 'tool_use':
         return { type: 'tool_call', id: block.id, name: block.name, arguments: block.input };
       case 'tool_result':
-        return { type: 'tool_call_response', id: block.tool_use_id, response: block.content };
+        // `response` is required on a tool_call_response part, and a
+        // tool_result block is allowed to carry no content at all (a tool that
+        // succeeded and returned nothing) — so the field is always present,
+        // empty string rather than absent.
+        return {
+          type: 'tool_call_response',
+          id: block.tool_use_id,
+          response: block.content ?? '',
+        };
+      case 'thinking':
+        return { type: 'text', content: block.thinking };
+      case 'redacted_thinking':
+        // Encrypted by the API and unreadable here, but its presence in the
+        // turn is worth seeing.
+        return { type: 'text', content: '[redacted_thinking]' };
       default:
-        return { type: block.type };
+        // Images, documents, server tool blocks: the convention recognizes only
+        // text / tool_call / tool_call_response, so anything else is reported
+        // as text naming the block type rather than as an unrecognized part
+        // type with no required field on it. The part count and ordering of the
+        // turn stay correct, which is what the message array is for.
+        return { type: 'text', content: `[${block.type}]` };
     }
   });
 }
