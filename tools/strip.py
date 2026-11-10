@@ -41,12 +41,12 @@ SPEC = [
     # anyway, so the only effect is a metrics-export 404 every 10s and a
     # Chapter 04 whose premise is false.
     ("backend/src/claude-instrumentation.ts", "//", [
-        ("3.3", 245, 246, "span.recordException(error)"),  # recordError: recordException + setStatus
-        ("4.1", 239, 244, "Failed calls still took time"),  # recordError: the duration histogram
-        ("3.3", 238, 238, "ATTR_ERROR_TYPE"),  # recordError: error.type
-        ("4.1", 217, 228, "const common = metricAttributes(request)"),  # recordResponse: both histograms
-        ("3.2", 208, 215, "if (captureMessageContent) {"),  # recordResponse: the response attributes
-        ("3.1", 171, 180, "ATTR_GEN_AI_OPERATION_NAME"),  # requestAttributes: the request attributes
+        ("3.3", 264, 265, "span.recordException(error)"),  # recordError: recordException + setStatus
+        ("4.1", 258, 263, "Failed calls still took time"),  # recordError: the duration histogram
+        ("3.3", 257, 257, "ATTR_ERROR_TYPE"),  # recordError: error.type
+        ("4.1", 236, 247, "const common = metricAttributes(request)"),  # recordResponse: both histograms
+        ("3.2", 227, 234, "if (captureMessageContent) {"),  # recordResponse: the response attributes
+        ("3.1", 190, 199, "ATTR_GEN_AI_OPERATION_NAME"),  # requestAttributes: the request attributes
     ]),
     ("frontend/src/rum/otel.ts", "//", [
         ("5.3", 485, 485, "startPageTrace(options.routeId)"),  # startPageTrace

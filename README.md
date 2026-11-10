@@ -268,9 +268,9 @@ Two metrics on the `tracey.llm` meter, both histograms: `gen_ai.client.token.usa
 
 These are the exact attributes Datadog Agent Observability ingests natively — no Datadog SDK anywhere in `backend/`, `inventory/`, or `kitchen/`.
 
-Each tool the agent runs gets its own span from `backend/src/order-instrumentation.ts`, named `execute_tool {name}` per the same `{operation} {target}` pattern, carrying `gen_ai.tool.name`, `gen_ai.tool.call.id` and `gen_ai.tool.type` (also `/incubating`). The call id is what lets a backend tie the tool execution back to the `chat` span that asked for it. Everything else on those spans is the private `pizza.*` namespace — no convention describes a pizza, and keeping the two groups visibly separate is half the lesson.
+Each tool the agent runs gets its own span from `backend/src/order-instrumentation.ts`, named `execute_tool {name}` per the same `{operation} {target}` pattern, carrying `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.tool.name`, `gen_ai.tool.call.id` and `gen_ai.tool.type` (also `/incubating`). The operation name and provider are what mark the span as a step in the agent loop rather than an anonymous internal span; the call id is what lets a backend tie the tool execution back to the `chat` span that asked for it. Everything else on those spans is the private `pizza.*` namespace — no convention describes a pizza, and keeping the two groups visibly separate is half the lesson.
 
-`gen_ai.provider.name` is `aws.bedrock`, not `anthropic` — see the Bedrock section below. The constant appears twice in `claude-instrumentation.ts` (once on the span, once in the `common` object shared by both metric instruments) and the two must agree, or a metric time series and a span filter disagree on provider and the cross-signal correlation the workshop demonstrates quietly breaks.
+`gen_ai.provider.name` is `aws.bedrock`, not `anthropic` — see the Bedrock section below. The constant appears twice in `claude-instrumentation.ts` (once on the span, once in the `common` object shared by both metric instruments) and once more on the `execute_tool` span in `order-instrumentation.ts`, and all three must agree, or a metric time series and a span filter disagree on provider and the cross-signal correlation the workshop demonstrates quietly breaks.
 
 ### Reference: Claude via Amazon Bedrock
 
