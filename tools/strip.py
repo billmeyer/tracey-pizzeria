@@ -30,10 +30,13 @@ SPEC = [
     # service autoconfigures a default OTLP metric reader, so a missing metrics
     # pipeline means a 404 stack trace per service every ten seconds.
     ("collector-config.yaml", "#", [
-        ("2.1", 144, 144, "- otlp_http/datadog"),   # logs -> datadog
-        ("2.1", 138, 138, "- otlp_http/datadog"),   # metrics -> datadog
-        ("2.1", 121, 121, "- otlp_http/datadog"),   # traces -> datadog
-        ("2.1", 102, 111, "Datadog's OTLP intake"), # the exporter itself
+        ("2.1", 205, 205, "- otlp_http/datadog"),   # logs -> datadog
+        ("2.1", 197, 197, "- otlp_http/datadog"),   # metrics -> datadog
+        ("2.1", 180, 180, "- otlp_http/datadog"),   # traces -> datadog
+        # The exporter itself, sending_queue included -- the queue is part of
+        # this exporter's config, so it has to be commented out with it rather
+        # than left behind referring to an exporter that no longer exists.
+        ("2.1", 109, 168, "Datadog's OTLP intake"),
     ]),
     # backend/src/otel.ts is deliberately NOT stripped. Commenting out
     # `metricReaders` does not disable metrics: NodeSDK falls back to

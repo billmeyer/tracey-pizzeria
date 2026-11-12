@@ -71,7 +71,13 @@ git checkout -q -- .
 say "Invariant 1b — the stripped config is still structurally whole"
 python3 tools/strip.py > /dev/null
 missing=""
-for key in '^exporters:' '^service:' '^    traces:' '^    metrics:' '^    logs:' 'send_batch_size'; do
+# The probe keys must be things that live OUTSIDE every stripped block, so any
+# of them going missing means a range has drifted onto content it should not
+# touch. `send_batch_size` used to be one of them and no longer exists -- the
+# batch processor was replaced by the exporter's sending_queue. Do not add
+# sending_queue keys here: they sit *inside* the Exercise 2.1 block and are
+# supposed to be commented out in the stripped state.
+for key in '^exporters:' '^service:' '^    traces:' '^    metrics:' '^    logs:' 'filter/healthz' 'cumulativetodelta' 'debug/metrics'; do
   grep -qE "$key" collector-config.yaml || missing="$missing $key"
 done
 if [[ -z $missing ]]; then
