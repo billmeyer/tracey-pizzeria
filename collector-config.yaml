@@ -80,10 +80,17 @@ processors:
   # expect one missing interval, not a gap.
   cumulativetodelta:
 
-  batch:
-    timeout: 5s
-    send_batch_size: 512
-
+# There is deliberately no `batch` processor here any more. Batching moved onto
+# the exporter's sending_queue (see otlp_http/datadog below), which is where
+# upstream is taking it — the processor predates the queue and sits in the wrong
+# place for it. A processor batches *before* the queue, so a batch is assembled,
+# handed to the queue, and then possibly split or retried as a unit it had no
+# say in; queue batching assembles the batch at send time, per consumer, which
+# is the only point that knows what is actually about to go on the wire.
+#
+# The practical consequence is one buffer instead of two. With both configured
+# you pay the processor's timeout *and* the queue's flush_timeout before
+# anything leaves, which is the latency nobody can ever account for.
 exporters:
   debug:
     verbosity: detailed
@@ -110,21 +117,73 @@ exporters:
     headers:
       dd-api-key: ${env:DD_API_KEY}
 
+    # Queue batching, tuned for a low latency floor with throughput coming from
+    # concurrency rather than from waiting longer.
+    #
+    # One queue serves all three pipelines, because sending_queue is per
+    # *exporter* and this one exporter is on traces, metrics and logs. Tuning a
+    # signal separately would mean a second exporter instance pointed at the
+    # same endpoint, which is worth doing only once a signal's volume actually
+    # demands different numbers.
+    sending_queue:
+      enabled: true
+
+      # Count items (spans, points, records), not requests. Everything below is
+      # in that unit, and `requests` — the default — would make min_size a count
+      # of upstream exports, which says nothing about payload size.
+      sizer: items
+
+      # Where the throughput actually comes from. A single consumer draining a
+      # queue serially is capped by round-trip time to the intake no matter how
+      # large the batches are; 16 gives 16 POSTs in flight against a remote
+      # endpoint whose latency dominates local work.
+      num_consumers: 16
+
+      # ~100k items of headroom, so a stall at the intake is absorbed rather
+      # than immediately felt upstream.
+      queue_size: 100000
+
+      # Backpressure rather than data loss. When the queue fills, the receiver
+      # blocks and OTLP producers see it; the alternative (false, the default)
+      # drops the overflow and reports it only in the exporter's own metrics,
+      # which is the kind of loss you discover a week later from a gap.
+      #
+      # Worth knowing for the workshop: this makes the Collector capable of
+      # slowing the app down. That is the correct trade for telemetry you intend
+      # to bill or alert on, and the wrong one for a best-effort debug feed.
+      block_on_overflow: true
+
+      batch:
+        # The latency floor: nothing waits longer than this, whatever the batch
+        # size. Replaces the old processor's 5s timeout, which was 25x this.
+        flush_timeout: 200ms
+
+        # Send as soon as this much has accumulated, without waiting out the
+        # timeout — so under load the 200ms ceiling is rarely reached and
+        # batches stay large enough to amortize the HTTP round trip.
+        min_size: 2000
+
+        # Payload cap. A batch larger than this is split rather than sent as one
+        # oversized POST the intake may reject outright.
+        max_size: 10000
+
 service:
   pipelines:
     traces:
       receivers: [otlp]
-      # filter before batch so dropped spans never take up room in a batch.
-      processors: [filter/healthz, batch]
+      # filter/healthz is the only processor left. Dropping healthz spans here
+      # still keeps them out of every batch downstream — the batch is now
+      # assembled in the exporter, which is strictly after this.
+      processors: [filter/healthz]
       exporters:
         - debug
         - otlp_http/datadog
     metrics:
       receivers: [otlp]
-      # cumulativetodelta before batch, for the same reason filter/healthz comes
-      # before it on the traces pipeline: do the per-point work while the points
-      # are still grouped by the export that produced them.
-      processors: [cumulativetodelta, batch]
+      # cumulativetodelta does its per-point work here, while the points are
+      # still grouped by the export that produced them, and well before the
+      # exporter's queue regroups them into send-sized batches.
+      processors: [cumulativetodelta]
       exporters:
         # Active, like the traces and logs pipelines above, and that matters
         # for more than symmetry. The workshop's starting state comments out
@@ -137,8 +196,10 @@ service:
         - debug/metrics
         - otlp_http/datadog
     logs:
+      # No processors at all now that batching has moved to the exporter. An
+      # empty stage is omitted rather than written as `processors: []`, which
+      # the Collector accepts but which reads as a list someone forgot to fill.
       receivers: [otlp]
-      processors: [batch]
       exporters:
         - debug
         - otlp_http/datadog
